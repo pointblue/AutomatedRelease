@@ -6,4 +6,6 @@ username='finnveloz'
 url=f'https://api.github.com/users/{username}'
 #make the request and return json
 user_data=requests.get(url).json()
+#prints json data
 pprint(user_data)
+
