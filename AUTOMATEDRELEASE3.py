@@ -36,8 +36,8 @@ def print_repo(repo):
         pass
 ## username variable
 orgname='pointblue'
-#password variable
-password='Learn9178@'
+
+
 ##github object
 g=Github()
 
