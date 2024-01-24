@@ -1,5 +1,10 @@
 from github import Github
 from github import GithubException
+
+
+
+
+
 def print_repo(repo):
     #prints full name of repo
     print("Full Name: ", repo.full_name)
@@ -30,17 +35,21 @@ def print_repo(repo):
     except:
         pass
 ## username variable
-username='finnveloz'
+orgname='pointblue'
 #password variable
 password='Learn9178@'
 ##github object
 g=Github()
 
-user=g.get_user(username)
+org=g.get_organization(orgname)
 ##for every repo in the users repo, use the print_repo function
-for repo in user.get_repos():
+i=0
+#for each repo in the org, print out
+for repo in org.get_repos():
+
+
+
     print_repo(repo)
     ##divides each repo section in output
     print('='*100)
-#for repo in g.search_repositories('python-tutorial'):
-    #print_repo(repo)
+
