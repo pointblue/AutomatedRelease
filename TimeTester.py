@@ -16,8 +16,8 @@ def attempt2():
     orgname = 'pointblue'
 
     ##github object
-    github_token='FinnV1'
-    g = Github()
+    github_token=str(input())
+    g = Github(github_token)
 
     org = g.get_organization(orgname)
     ##for every repo in the users repo, use the print_repo function
