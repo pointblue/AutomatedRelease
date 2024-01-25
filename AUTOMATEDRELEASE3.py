@@ -1,6 +1,6 @@
 from github import Github
 from github import GithubException
-
+import base64
 
 
 
@@ -44,12 +44,29 @@ g=Github()
 org=g.get_organization(orgname)
 ##for every repo in the users repo, use the print_repo function
 i=0
+outputlist=[]
 #for each repo in the org, print out
 for repo in org.get_repos():
+    print((str(repo.full_name)))
+    repo_name = repo.full_name
+    repo_url = f'https://github.com/{repo_name}.git'
+    process = subprocess.Popen(["git", "ls-remote", repo_url], stdout=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    sha = re.split(r'\t+', stdout.decode('ascii'))[0]
+
+    # Get the last commit date using PyGithub
+    last_commit_date = repo.get_commit(sha).commit.author.date
+
+    # Print the repo name and its last commit date
+    print(f"Repo: {repo_name}, Last Commit Date: {last_commit_date}")
+    print(f'='*50)
+    if(i==3):
+        break
+    i+=1
 
 
-
-    print_repo(repo)
+    #print_repo(repo)
     ##divides each repo section in output
-    print('='*100)
 
+
+print(outputlist)
