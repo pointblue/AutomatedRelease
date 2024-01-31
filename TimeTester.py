@@ -39,10 +39,11 @@ def attempt2():
                 ## Iterate through the commits
                 for commit in commits:
                     commit_date = commit.commit.author.date
+                    commit_title = commit.commit.message.split('\n')[0]  # Get the first line of commit message as title
                     ## Check if the commit date is within the last two weeks
                     if commit_date > current_date - timedelta(weeks=2):
                         ## Update timelist with the commit date
-                        timelist.setdefault(branch_name, []).append(commit_date)
+                        timelist.setdefault(branch_name, []).append((commit_date,commit_title))
                         datecount += 1
                     ## Update the last commit date for the branch
                     if branch_name not in last_commit_date or commit_date > last_commit_date[branch_name]:
@@ -73,8 +74,13 @@ def attempt2():
         print(f'{datecount} commits within 2 weeks successfully retrieved, {errorcount} errors in retrieval')
         print(f'Commits made in the last 2 weeks: ')
         for branch_name, commits in timelist.items():
-            formatted_commits = ", ".join(commit_date.strftime('%Y-%m-%d %H:%M:%S %Z') for commit_date in commits)
-            print(f"Branch: {branch_name}, Commits: {formatted_commits}")
+            #formatted_commits = ", ".join(commit_date.strftime('%Y-%m-%d %H:%M:%S %Z') for commit_date in commits)
+            print(f'Branch: {branch_name}')
+            for commit_date,commit_title in commits:
+                formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                print(f"  - Date: {formatted_date}, Title: {commit_title}")
+
+
         print('=' * 50)
 
 attempt2()
