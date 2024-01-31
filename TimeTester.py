@@ -1,88 +1,80 @@
-from github import Github
-from github import GithubException
-import base64
-import subprocess
 import re
-from optparse import OptionParser
-
-def git_version():
-    pass
-    #p = subprocess.Popen(["git", "log" , '-1', '--date=iso'], stdout=subprocess.PIPE)
-    #out, err = p.communicate()
-    #m = re.search('\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}', out)
-    #return m.group(0)
+import subprocess
+from github import Github
+from datetime import datetime, timedelta, timezone
 
 def attempt2():
     orgname = 'pointblue'
+    ##prompt user enter pa token
+    print('Please enter your GitHub personal access token: ')
+    github_token = str(input())
 
-    ##github object
-    github_token=str(input())
+    ##authenticate with github token
     g = Github(github_token)
-
+    ##gets current date for utc timezone
+    current_date = datetime.now(timezone.utc)
+    ##gets organization object from github
     org = g.get_organization(orgname)
-    ##for every repo in the users repo, use the print_repo function
-    i = 0
-    outputlist = []
-    # for each repo in the org, print out
+    ##iterates through each repo in the org
     for repo in org.get_repos():
-        print((str(repo.full_name)))
-        ##assigns the repos full name to the repo_name variable
-        repo_name = repo.full_name
-        ##assigns the string of the url of the repo to the repo_url variable
-        repo_url = f'https://github.com/{repo_name}.git'
-        ##opens the subprocess module, passing the git arguemnt, ls-remote which specifices that information is recieved from remote source
-        ##passes the url of the repo
-        ##then a pipe is created to capture output, allowing python to read it
-        ##the output of git ls-remote on the url given by the repo_variable
-        process = subprocess.Popen(["git", "ls-remote", repo_url], stdout=subprocess.PIPE)
+        ##counter for outputting how many dates within the last 2 weeks were succsusfully outputted
+        datecount = 0
+        timelist={}
+        ##counter for exception handling, increments every time attempt to retrieve commit and fail
+        errorcount = 0
+        last_commit_date = {}  # Dictionary to store the latest commit date for each branch
+        ## prints repo name
+        print(f"Repository: {repo.full_name}")
+        ##iterates through each branch of repo
+        for branch in repo.get_branches():
+            ##repo_name assigned to a variable
+            repo_name = repo.full_name
+            ##branch name assigned to variable
+            branch_name = branch.name
+            ##prints out branch name
+            #print(f'Branch: {branch_name}')
+            try:
+                ## Fetch the commits for the branch within the last two weeks
+                commits = repo.get_commits(since=current_date - timedelta(weeks=2), sha=branch.commit.sha)
+                ## Iterate through the commits
+                for commit in commits:
+                    commit_date = commit.commit.author.date
+                    ## Check if the commit date is within the last two weeks
+                    if commit_date > current_date - timedelta(weeks=2):
+                        ## Update timelist with the commit date
+                        timelist.setdefault(branch_name, []).append(commit_date)
+                        datecount += 1
+                    ## Update the last commit date for the branch
+                    if branch_name not in last_commit_date or commit_date > last_commit_date[branch_name]:
+                        last_commit_date[branch_name] = commit_date
+                ## handles exceptions when getting commits
+            except Exception as e:
+                #prints error message
+                print(f'Error fetching commits: {e}')
+                errorcount += 1
 
-        stdout, stderr = process.communicate()
-        ##splits  sha from the other reference information outputed, using stdout,decode to convert neccesary information into text, -1 to hopefully get last commit date in list
-        sha = re.split(r'\t+', stdout.decode('ascii'))[-1]
-        #print(sha)
+        # Check if there are branches with no commits in the last two weeks and update last_commit_date
+        for branch in repo.get_branches():
+            branch_name = branch.name
+            if branch_name not in last_commit_date:
+                try:
+                    last_commit_date[branch_name] = branch.commit.commit.author.date
+                except Exception as e:
+                    print(f'Error fetching last commit date for branch {branch_name}: {e}')
+                    errorcount += 1
 
+        # Print the last commit date for each branch
+        for branch_name, branch_last_commit_date in last_commit_date.items():
+            print(f"Branch: {branch_name}, Last Commit Date: {branch_last_commit_date}")
 
+        # Print the repo name and its last commit dates
+        #print(f"Repo: {repo_name}, Last Commit Dates: {last_commit_date}")
 
-        ##using the sha, get a specific repo, acsess the commit, the author, and then retrieve the date
-        last_commit_date = repo.get_commit(sha).commit.author.date
-
-        # Print the repo name and its last commit date
-        print(f"Repo: {repo_name}, Last Commit Date: {last_commit_date}")
-        print(f'=' * 50)
-        ##RATE LIMITER
-        #if (i == 1):
-            #break
-        #i += 1
-def attempt3 ():
-    orgname = 'pointblue'
-    ##github object
-    #github_token = 'FinnV1'
-    g = Github()
-    org = g.get_organization(orgname)
-    ##for every repo in the users repo, use the print_repo function
-    i = 0
-    # for each repo in the org, print out
-    for repo in org.get_repos():
-        #print_repo(repo)
-        ##divides each repo section in output
-        print('=' * 100)
-        tree = repo.heads.master.commit.tree
-        for blob in tree:
-            commit = next(repo.iter_commits(paths=blob.path, max_count=1))
-            print(blob.path, commit.committed_date)
-
-        if(i==0):
-            break
-        i+=1
-
-
+        print(f'{datecount} commits within 2 weeks successfully retrieved, {errorcount} errors in retrieval')
+        print(f'Commits made in the last 2 weeks: ')
+        for branch_name, commits in timelist.items():
+            formatted_commits = ", ".join(commit_date.strftime('%Y-%m-%d %H:%M:%S %Z') for commit_date in commits)
+            print(f"Branch: {branch_name}, Commits: {formatted_commits}")
+        print('=' * 50)
 
 attempt2()
-#attempt3()
-#usage = "usage: %prog -f filepath"
-#parser = OptionParser(usage=usage)
-#parser.add_option("-f", default='version.py')
-#(options, args) = parser.parse_args()
-#path = options.f
-#with open(path, 'w+') as f:
-    #f.write(git_version())
