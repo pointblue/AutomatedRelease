@@ -38,19 +38,19 @@ def attempt2():
                 commits = repo.get_commits(since=current_date - timedelta(weeks=2), sha=branch.commit.sha)
                 ## Iterate through the commits
                 for commit in commits:
-                    
+
                     commit_date = commit.commit.author.date
                     commit_title = commit.commit.message.split('\n')[0]  # Get the first line of commit message as title
                     ## Check if the commit date is within the last two weeks
                     if commit_date > current_date - timedelta(weeks=2):
-                        ##appends timelise with tuple of commit date and commit title
+                        #appends timelise with tuple of commit date and commit title
                         timelist.setdefault(branch_name, []).append((commit_date,commit_title))
                         datecount += 1
-                    ## Update the last commit date for the branch
-                    ## ensures each branch has its latest own commit saved
+                    # Update the last commit date for the branch
+                    # ensures each branch has its latest own commit saved
                     if branch_name not in last_commit_date or commit_date > last_commit_date[branch_name]:
                         last_commit_date[branch_name] = commit_date
-                ## handles exceptions when getting commits
+                # handles exceptions when getting commits
             except Exception as e:
                 #prints error message
                 print(f'Error fetching commits: {e}')
@@ -61,7 +61,7 @@ def attempt2():
             branch_name = branch.name
             if branch_name not in last_commit_date:
                 try:
-                    ##gets last commit date for branch
+                    #Gets last commit date for branch
                     last_commit_date[branch_name] = branch.commit.commit.author.date
                 except Exception as e:
                     print(f'Error fetching last commit date for branch {branch_name}: {e}')
