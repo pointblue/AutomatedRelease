@@ -2,12 +2,31 @@ import re
 import subprocess
 from github import Github
 from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
+import os
+
+
+
+
 
 def attempt2():
     orgname = 'pointblue'
     ##prompt user enter pa token
-    print('Please enter your GitHub personal access token: ')
-    github_token = str(input())
+    load_dotenv()
+
+    github_token = os.getenv('GITHUB_TOKEN')
+
+    if not github_token:
+        envpath=os.path.exists('env')
+        if not (envpath):
+            with open('.env', 'w') as fh:
+                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
+                fh.write(f'GITHUB_TOKEN={github_token}')
+                print('If you are pushing commits to this code, remember to add your .env file to .gitignore')
+
+        else:
+            print('Please add your GitHub token to your dotenv file')
+
 
     ##authenticate with github token
     g = Github(github_token)
