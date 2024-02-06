@@ -18,6 +18,7 @@ def attempt2():
 
     if not github_token:
         envpath=os.path.exists('env')
+
         if not (envpath):
             with open('.env', 'w') as fh:
                 github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
@@ -58,6 +59,7 @@ def attempt2():
             if(branch_name=='dev'):
                 try:
                     print(f"Repository: {repo.full_name}")
+                    ##variable for ensuring '======' gets printed in the right place
                     printcount=1
                     ## Fetch the commits for the branch within the last two weeks
                     commits = repo.get_commits(since=current_date - timedelta(weeks=2), sha=branch.commit.sha)
@@ -72,7 +74,7 @@ def attempt2():
                             # appends timelise with tuple of commit date and commit title
                             timelist.setdefault(branch_name, []).append((commit_date, commit_title))
                             datecount += 1
-                        # Update the last commit date for the branch
+                        # Update the  commit date for the branch if within two weeks
                         # ensures each branch has its latest own commit saved
                         if branch_name not in last_commit_date or commit_date > last_commit_date[branch_name]:
                             last_commit_date[branch_name] = commit_date
