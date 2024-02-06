@@ -11,11 +11,11 @@
      - When prompted by the python file, enter your token 
 
  2.   Running the program
-     - Clone the repo 'AutomatedRelease' to your machine
-     - Run the 'main' file
-     - If a dotenv file does not already exist, you will be prompted to enter your GitHub token
-     - A env file will then be created with your token saved inside
-     - If you are pushing commits to this code, remember to add your dotenv file to .gitignore
+     * Clone the repo 'AutomatedRelease' to your machine
+     * Run the 'main' file
+     * If a dotenv file does not already exist, you will be prompted to enter your GitHub token
+     * A env file will then be created with your token saved inside
+     * If you are pushing commits to this code, remember to add your dotenv file to .gitignore
 
   
 
@@ -29,8 +29,8 @@
 ## Dependencies
 1.  github
 2.  python-dotenv
-    In order to run this program, you will need to have installed the proper dependencies.
-    You can do this by opening an IDE and running the command 'pip install {example_module}' for each dependency you are missing.
+In order to run this program, you will need to have installed the proper dependencies.
+You can do this by opening an IDE and running the command 'pip install {example_module}' for each dependency you are missing.
 
 ## Details
 
