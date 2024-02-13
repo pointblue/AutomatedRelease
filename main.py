@@ -11,10 +11,11 @@ import os
 
 def attempt2():
     orgname = 'pointblue'
-    ##prompt user enter pa token
+
     load_dotenv()
 
     github_token = os.getenv('GITHUB_TOKEN')
+    ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
 
     if not github_token:
         envpath=os.path.exists('env')
@@ -30,32 +31,31 @@ def attempt2():
             print('Please add your GitHub token to your dotenv file')
 
 
-    ##authenticate with github token
+
     g = Github(github_token)
-    ##gets current date for utc timezone
+
     current_date = datetime.now(timezone.utc)
-    ##gets organization object from github
+
     org = g.get_organization(orgname)
-    ##iterates through each repo in the org
+
     for repo in org.get_repos():
         ##counter for outputting how many dates within the last 2 weeks were succsusfully outputted
         datecount = 0
         timelist={}
+
         ##counter for exception handling, increments every time attempt to retrieve commit and fail
         errorcount = 0
         last_commit_date = {}  # Dictionary to store the latest commit date for each branch
-        ## prints repo name
+        ##counter to correctly output '=====' divider
         printcount=0
-        ##iterates through each branch of repo
+
         for branch in repo.get_branches():
-            ##repo_name assigned to a variable
-            repo_name = repo.full_name
-            ##branch name assigned to variable
+
+
             branch_name = branch.name
 
 
-            ##prints out branch name
-            #print(f'Branch: {branch_name}')
+
             if(branch_name=='dev'):
                 try:
                     print(f"Repository: {repo.full_name}")
@@ -63,7 +63,7 @@ def attempt2():
                     printcount=1
                     ## Fetch the commits for the branch within the last two weeks
                     commits = repo.get_commits(since=current_date - timedelta(weeks=2), sha=branch.commit.sha)
-                    ## Iterate through the commits
+
                     for commit in commits:
 
                         commit_date = commit.commit.author.date
@@ -71,14 +71,15 @@ def attempt2():
                             0]  # Get the first line of commit message as title
                         ## Check if the commit date is within the last two weeks
                         if commit_date > current_date - timedelta(weeks=2):
-                            # appends timelise with tuple of commit date and commit title
+                            ##date and title stored as tuple
                             timelist.setdefault(branch_name, []).append((commit_date, commit_title))
+
                             datecount += 1
                         # Update the  commit date for the branch if within two weeks
                         # ensures each branch has its latest own commit saved
                         if branch_name not in last_commit_date or commit_date > last_commit_date[branch_name]:
                             last_commit_date[branch_name] = commit_date
-                    # handles exceptions when getting commits
+
                 except Exception as e:
                     # prints error message
                     print(f'Error fetching commits: {e}')
@@ -105,7 +106,7 @@ def attempt2():
             print(f"Branch: {branch_name}, Last Commit Date: {branch_last_commit_date}")
 
         # Print the repo name and its last commit dates
-        #print(f"Repo: {repo_name}, Last Commit Dates: {last_commit_date}")
+       
         if(datecount==0):
             pass
         else:
