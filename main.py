@@ -6,10 +6,42 @@ from dotenv import load_dotenv
 import os
 
 
+def get_sprintdates():
+    today = datetime.now(timezone.utc)
+    first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
+    weeks_since_start_of_year = (today - first_day_of_year).days // 7
+    is_odd_week = weeks_since_start_of_year % 2 == 0
+    sprint_start_date = first_day_of_year + timedelta(weeks=weeks_since_start_of_year)
+    if not is_odd_week:
+        # If the current week is even, move to the next Monday
+        sprint_start_date += timedelta(days=(7 - sprint_start_date.weekday()))
+
+    sprint_end_date = sprint_start_date + timedelta(days=4) + timedelta(weeks=1)
+    return sprint_start_date, sprint_end_date
+
+def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
+    sprint_commits = []
+    try:
+        dev_branch = repo.get_branch("dev")
+        #print(f"Fetching commits for {repo.full_name}...")
+        commits = repo.get_commits(since=sprint_start_date, until=sprint_end_date, sha=dev_branch.commit.sha)
+        for commit in commits:
+            commit_date = commit.commit.author.date
+            sprint_commits.append(('dev', commit_date, commit.commit.message.split('\n')[0]))
+        #print(f"Successfully fetched {len(sprint_commits)} commits for {repo.full_name}.")
+
+    except Exception as e:
+        ##outputs list of repos where no commits found, no dev branch
+        errorlist.append(e)
+        #print(f'Error fetching commits for {repo.full_name}: {e}')
+
+    return sprint_commits
 
 
 
 def attempt2():
+    global errorlist
+    errorlist=[]
     orgname = 'pointblue'
 
     load_dotenv()
@@ -17,111 +49,50 @@ def attempt2():
     github_token = os.getenv('GITHUB_TOKEN')
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
 
-    if not github_token:
-        envpath=os.path.exists('env')
 
+    sprint_start_date, sprint_end_date = get_sprintdates()
+
+    ###THESE 2 lines  CAN BE USED TO TEST THIS PROGRAM, just change date to date range you want to test
+    #sprint_start_date = datetime(datetime.now().year, 1, 1, tzinfo=timezone.utc)
+    #sprint_end_date = datetime(datetime.now().year, 2, 23, tzinfo=timezone.utc)
+
+
+    print(f'Current sprint: {sprint_start_date.strftime("%Y-%m-%d")} to {sprint_end_date.strftime("%Y-%m-%d")}')
+    if not github_token:
+        envpath = os.path.exists('env')
+        print('No Github Token')
         if not (envpath):
             with open('.env', 'w') as fh:
-                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
+                github_token = input(
+                    'Please enter your GitHub personal access token so that it can be stored for later use: ')
                 fh.write(f'GITHUB_TOKEN={github_token}')
                 print('If you are pushing commits to this code, remember to add your .env file to .gitignore')
-            
 
         else:
             print('Please add your GitHub token to your dotenv file')
 
-
-
     g = Github(github_token)
-
-    current_date = datetime.now(timezone.utc)
-
     org = g.get_organization(orgname)
 
     for repo in org.get_repos():
-        ##counter for outputting how many dates within the last 2 weeks were succsusfully outputted
-        datecount = 0
-        timelist={}
+        try:
+            ##stores the date, title,and branch in commits in branch dev from sprint period
+            out = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
+            if (out):
+                print(f"Repository: {repo.full_name}")
+                for branch_name, commit_date, commit_title in out:
+                    formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                    print(f'Branch: {branch_name}, Date: {formatted_date}, Title: {commit_title}')
+                print('=' * 50)
 
-        ##counter for exception handling, increments every time attempt to retrieve commit and fail
-        errorcount = 0
-        last_commit_date = {}  # Dictionary to store the latest commit date for each branch
-        ##counter to correctly output '=====' divider
-        printcount=0
+        except Exception as e:
+            print(f'Error fetching commits: {e}')
 
-        for branch in repo.get_branches():
-
-
-            branch_name = branch.name
-
-
-
-            if(branch_name=='dev'):
-                try:
-                    print(f"Repository: {repo.full_name}")
-                    ##variable for ensuring '======' gets printed in the right place
-                    printcount=1
-                    ## Fetch the commits for the branch within the last two weeks
-                    commits = repo.get_commits(since=current_date - timedelta(weeks=2), sha=branch.commit.sha)
-
-                    for commit in commits:
-
-                        commit_date = commit.commit.author.date
-                        commit_title = commit.commit.message.split('\n')[
-                            0]  # Get the first line of commit message as title
-                        ## Check if the commit date is within the last two weeks
-                        if commit_date > current_date - timedelta(weeks=2):
-                            ##date and title stored as tuple
-                            timelist.setdefault(branch_name, []).append((commit_date, commit_title))
-
-                            datecount += 1
-                        # Update the  commit date for the branch if within two weeks
-                        # ensures each branch has its latest own commit saved
-                        if branch_name not in last_commit_date or commit_date > last_commit_date[branch_name]:
-                            last_commit_date[branch_name] = commit_date
-
-                except Exception as e:
-                    # prints error message
-                    print(f'Error fetching commits: {e}')
-                    errorcount += 1
 
 
         # Check if there are branches with no commits in the last two weeks and update last_commit_date
-
-        for branch in repo.get_branches():
-            branch_name = branch.name
-            if(branch_name=='dev'):
-                if branch_name not in last_commit_date:
-                    try:
-                        # Gets last commit date for branch
-                        last_commit_date[branch_name] = branch.commit.commit.author.date
-                    except Exception as e:
-                        print(f'Error fetching last commit date for branch {branch_name}: {e}')
-                        errorcount += 1
-
-
-        # Print the last commit date for each branch
-        count=0
-        for branch_name, branch_last_commit_date in last_commit_date.items():
-            print(f"Branch: {branch_name}, Last Commit Date: {branch_last_commit_date}")
-
-        # Print the repo name and its last commit dates
-       
-        if(datecount==0):
-            pass
-        else:
-            print(f'{datecount} commits within 2 weeks successfully retrieved, {errorcount} errors in retrieval')
-            print(f'Commits made in the last 2 weeks: ')
-            for branch_name, commits in timelist.items():
-                # formatted_commits = ", ".join(commit_date.strftime('%Y-%m-%d %H:%M:%S %Z') for commit_date in commits)
-                print(f'Branch: {branch_name}')
-                ##for every commit date and title in commits, format the date into an easily readable format, and print the title
-                for commit_date, commit_title in commits:
-                    formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
-                    print(f"  - Date: {formatted_date}, Title: {commit_title}")
-
-
-        if(printcount==1):
-            print('=' * 50)
-
 attempt2()
+print('END')
+
+for e in errorlist:
+    print(e)
