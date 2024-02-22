@@ -10,13 +10,18 @@ def get_sprintdates():
     today = datetime.now(timezone.utc)
     first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
     weeks_since_start_of_year = (today - first_day_of_year).days // 7
-    is_odd_week = weeks_since_start_of_year % 2 == 0
-    sprint_start_date = first_day_of_year + timedelta(weeks=weeks_since_start_of_year)
-    if not is_odd_week:
-        # If the current week is even, move to the next Monday
-        sprint_start_date += timedelta(days=(7 - sprint_start_date.weekday()))
 
+    sprint_start_date = first_day_of_year + timedelta(weeks=weeks_since_start_of_year)
     sprint_end_date = sprint_start_date + timedelta(days=4) + timedelta(weeks=1)
+
+
+    if sprint_end_date > today:
+        #moves back if sprint end is in future
+        sprint_start_date -= timedelta(weeks=2)
+        sprint_end_date -= timedelta(weeks=1)
+
+    # Move to the Monday that started the sprint
+    sprint_start_date += timedelta(days=(7 - sprint_start_date.weekday()))
     return sprint_start_date, sprint_end_date
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
@@ -28,12 +33,12 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
         for commit in commits:
             commit_date = commit.commit.author.date
             sprint_commits.append(('dev', commit_date, commit.commit.message.split('\n')[0]))
-        #print(f"Successfully fetched {len(sprint_commits)} commits for {repo.full_name}.")
+
 
     except Exception as e:
         ##outputs list of repos where no commits found, no dev branch
         errorlist.append(e)
-        #print(f'Error fetching commits for {repo.full_name}: {e}')
+
 
     return sprint_commits
 
