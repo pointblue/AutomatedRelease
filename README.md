@@ -28,8 +28,8 @@ created and configured for you.
 
 
 ## Dependencies
-1.  github
-2.  python-dotenv
+1.   [PyGithub](https://pypi.org/project/PyGithub/)
+2.   [python-dotenv](https://pypi.org/project/python-dotenv/)
 
 In order to run this program, you will need to have installed the proper dependencies.
 You can do this by opening an IDE and running the command 'pip install {example_module}' for each dependency you are missing.
