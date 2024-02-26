@@ -26,6 +26,7 @@ def get_sprintdates():
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
     sprint_commits = []
+    errorlist=[]
     try:
         dev_branch = repo.get_branch("dev")
         #print(f"Fetching commits for {repo.full_name}...")
@@ -40,15 +41,15 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
         errorlist.append(e)
 
 
-    return sprint_commits
+    return sprint_commits,errorlist
 
 
 
-def attempt2():
-    global errorlist
-    errorlist=[]
+def print_commits():
+
+
     orgname = 'pointblue'
-
+    errorlist=[]
     load_dotenv()
 
     github_token = os.getenv('GITHUB_TOKEN')
@@ -82,7 +83,11 @@ def attempt2():
     for repo in org.get_repos():
         try:
             ##stores the date, title,and branch in commits in branch dev from sprint period
-            out = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
+            out,errors = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
+            ##appends errorlist with error messages that are not empty
+            if(len(str(errors))>1):
+                errorlist.append(errors)
+
             if (out):
                 print(f"Repository: {repo.full_name}")
                 for branch_name, commit_date, commit_title in out:
@@ -92,12 +97,13 @@ def attempt2():
 
         except Exception as e:
             print(f'Error fetching commits: {e}')
+    for e in errorlist:
+        if(str(e).strip()):
+            print(e)
 
 
 
         # Check if there are branches with no commits in the last two weeks and update last_commit_date
-attempt2()
+print_commits()
 print('END')
 
-for e in errorlist:
-    print(e)
