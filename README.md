@@ -41,6 +41,19 @@ You can do this by opening an IDE and running the command 'pip install {example_
      * Using methods from the GitHub class, the program retrieves the organizations name and repos
      * Using the 'git -ls remote' command, the program retrieves the SHA from Github using the repo url
      * The repo.get_commit() method is used to get a specific commit from the SHA
+
+## Making GET requests
+
+    * Open Postman
+    * Create a new GET request
+    * Enter the base url from confluence you are trying to connect too
+    * Ex.(https://pointblue.atlassian.net/wiki)
+    * Add REST api information to url
+    * Ex.(https://pointblue.atlassian.net/wiki/rest/api/content)
+    * Add query parameters like page limit or ids of pages
+    * These are denoted either with a question mark at the end of the url, or by pressing edit in QUERY section
+    * Ex. (https://pointblue.atlassian.net/wiki/rest/api/content?limit=5)
+    * Press send
  
  
 
