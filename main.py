@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 
 
+
 def get_sprintdates():
     today = datetime.now(timezone.utc)
 
@@ -109,6 +110,9 @@ def print_commits():
         try:
             ##stores the date, title,and branch in commits in branch dev from sprint period
             out,errors = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
+            team=org.get_team_by_slug('Deployers')
+            permission=team.get_repo_permission(repo)
+
             ##appends errorlist with error messages that are not empty
             if(errors):
                 errorlist.extend(errors)
@@ -118,6 +122,8 @@ def print_commits():
                 for branch_name, commit_date, commit_title in out:
                     formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     print(f'Branch: {branch_name}, Date: {formatted_date}, Title: {commit_title}')
+
+                print(permission)
                 print('=' * 50)
 
         except Exception as e:
