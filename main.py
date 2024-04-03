@@ -13,38 +13,36 @@ def get_sprintdates():
     # today=datetime(2024,2,7,tzinfo=timezone.utc) #(date in even week that  shouldnt be output) outputs 2024-01-15 tom 2024-01-26
     # today=datetime(2024,1,30,tzinfo=timezone.utc) # start in odd week OUTPUTS 2024-01-15 to 2024-01-26
     # today = datetime(2024, 1, 29, tzinfo=timezone.utc) #2024-01-15 to 2024-01-26
-    # today = datetime(2024, 1, 29, tzinfo=timezone.utc) #2024-01-15 to 2024-01-26
+    #today = datetime(2024, 1, 29, tzinfo=timezone.utc) #2024-01-15 to 2024-01-26
     # today = datetime(2024, 1, 28, tzinfo=timezone.utc) #2024-01-01 to 2024-01-12 NOW 2024-01-15 to 2024-01-26 saturday case
     # today = datetime(2024, 1, 26, tzinfo=timezone.utc) #2024-01-01 to 2024-01-12 correct
     # today = datetime(2024, 1, 21, tzinfo=timezone.utc) # 2024-02-12 to 2024-02-23
     # today = datetime(2024, 2, 10, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
-    # today = datetime(2024, 2, 17, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
+    #today = datetime(2023, 6, 14, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
+
+
 
     first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
     full_weeks_since_year_start = (today - first_day_of_year).days // 7
-    ##Used to correctly calculate weeknumber
-    weekremainder = (today - first_day_of_year).days % 7
 
-    ##Updates the weeknumber if days left over from // divison
-    if (weekremainder != 0):
-        weeknumber = full_weeks_since_year_start + 1
-    else:
-        weeknumber = full_weeks_since_year_start
 
-    ##gets startcheck to right week
-    startcheck = first_day_of_year + timedelta(weeks=weeknumber)
-    ##gets startcheck to the right monday(this shouldnt matter in 2024, i added in case other years mess somthing up)
-    startcheck = startcheck - timedelta(days=startcheck.weekday())
-    
-    if (weeknumber % 2 == 0):
-        startcheck -= timedelta(weeks=2)
 
-    else:
-        startcheck -= timedelta(weeks=3)
-    sprint_start = startcheck
+
+    ## We add a plus one because the integer divison can only find what week you are in by measuring how many full weeks have passed,
+    ## and so we still need to account for the current week we are in
+    week_number=full_weeks_since_year_start+1
+
+    ##gets find_following_monday to right week
+    find_following_monday = first_day_of_year + timedelta(weeks=week_number)
+    ##gets find_following_monday to the right monday(this shouldnt matter in 2024, i added in case other years mess somthing up)
+    find_following_monday = find_following_monday - timedelta(days=find_following_monday.weekday())
+
+    find_following_monday -= timedelta(weeks=4) if week_number % 2 == 0 else timedelta(weeks=3)
+
+    sprint_start = find_following_monday
     sprint_end = sprint_start + timedelta(days=4) + timedelta(weeks=1)
 
-    print(f'Week Number: {weeknumber}')
+    print(f'Week Number: {week_number}')
     return sprint_start, sprint_end
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
