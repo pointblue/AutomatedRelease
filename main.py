@@ -8,61 +8,42 @@ import os
 
 def get_sprintdates():
     today = datetime.now(timezone.utc)
+
     ##test cases
-    #today=datetime(2024,2,7,tzinfo=timezone.utc) #(date in even week that shouldnt be output) outputs 2024-01-15 tom 2024-01-26
-    #today=datetime(2024,1,30,tzinfo=timezone.utc) # start in odd week OUTPUTS 2024-01-15 to 2024-01-26
+    # today=datetime(2024,2,7,tzinfo=timezone.utc) #(date in even week that  shouldnt be output) outputs 2024-01-15 tom 2024-01-26
+    # today=datetime(2024,1,30,tzinfo=timezone.utc) # start in odd week OUTPUTS 2024-01-15 to 2024-01-26
+    # today = datetime(2024, 1, 29, tzinfo=timezone.utc) #2024-01-15 to 2024-01-26
     #today = datetime(2024, 1, 29, tzinfo=timezone.utc) #2024-01-15 to 2024-01-26
-    #today = datetime(2024, 1, 29, tzinfo=timezone.utc) #2024-01-15 to 2024-01-26
-    #today = datetime(2024, 1, 28, tzinfo=timezone.utc) #2024-01-01 to 2024-01-12 NOW 2024-01-15 to 2024-01-26 saturday case
-    #today = datetime(2024, 1, 26, tzinfo=timezone.utc) #2024-01-01 to 2024-01-12 correct
-    #today = datetime(2024, 1, 21, tzinfo=timezone.utc) # 2024-02-12 to 2024-02-23
-    #today = datetime(2024, 2, 10, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
-    #today = datetime(2024, 2, 17, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
+    # today = datetime(2024, 1, 28, tzinfo=timezone.utc) #2024-01-01 to 2024-01-12 NOW 2024-01-15 to 2024-01-26 saturday case
+    # today = datetime(2024, 1, 26, tzinfo=timezone.utc) #2024-01-01 to 2024-01-12 correct
+    # today = datetime(2024, 1, 21, tzinfo=timezone.utc) # 2024-02-12 to 2024-02-23
+    # today = datetime(2024, 2, 10, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
+    #today = datetime(2023, 6, 14, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
 
 
 
-
-    ##
     first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
-    weeks_since_start_of_year = (today - first_day_of_year).days // 7
-
-    sprint_start_date = first_day_of_year + timedelta(weeks=weeks_since_start_of_year)
-    sprint_end_date = sprint_start_date + timedelta(days=4) + timedelta(weeks=1)
+    full_weeks_since_year_start = (today - first_day_of_year).days // 7
 
 
-    if sprint_end_date > today:
-        #moves back if sprint end is in future
-        sprint_start_date -= timedelta(weeks=2)
-        sprint_end_date -= timedelta(weeks=1)
-    ############
-    if sprint_start_date.weekday() != 0 or weeks_since_start_of_year % 2 == 0:
-        sprint_start_date += timedelta(weeks=1)
 
-        # Adjust the end date to the Friday of the even week
-    if sprint_end_date.weekday() != 4 or weeks_since_start_of_year % 2 != 0:
-        sprint_end_date += timedelta(weeks=1)
-    ###########
-    # Move to the Monday that started the sprint
-    sprint_start_date += timedelta(days=(7 - sprint_start_date.weekday()))
-    #print(f'{sprint_start_date, sprint_end_date}')
-    ##
 
-    ##CHECKS IF TODAY IS SATURDAY OR SUNDAY
-    if(today.weekday()==5 or today.weekday()==6):
-        sprint_end_date = sprint_start_date + timedelta(days=4) + timedelta(weeks=1)
-        #print(f'{sprint_start_date, sprint_end_date},NOOO')
+    ## We add a plus one because the integer divison can only find what week you are in by measuring how many full weeks have passed,
+    ## and so we still need to account for the current week we are in
+    week_number=full_weeks_since_year_start+1
 
-        ##MAKES SURE END DATE NOT IN FUTURE AGAIN
-        if not(sprint_end_date>today):
-            #print(f'{sprint_start_date, sprint_end_date},YESSSS')
-            return sprint_start_date,sprint_end_date
-    ##
-    while(sprint_end_date>=today):
-        sprint_start_date -= timedelta(weeks=2)
-        sprint_end_date -= timedelta(weeks=2)
-        #print(f'{sprint_start_date, sprint_end_date}')
-    sprint_end_date = sprint_start_date + timedelta(days=4) + timedelta(weeks=1)
-    return sprint_start_date, sprint_end_date
+    ##gets find_following_monday to right week
+    find_following_monday = first_day_of_year + timedelta(weeks=week_number)
+    ##gets find_following_monday to the right monday(this shouldnt matter in 2024, i added in case other years mess somthing up)
+    find_following_monday = find_following_monday - timedelta(days=find_following_monday.weekday())
+
+    find_following_monday -= timedelta(weeks=4) if week_number % 2 == 0 else timedelta(weeks=3)
+
+    sprint_start = find_following_monday
+    sprint_end = sprint_start + timedelta(days=4) + timedelta(weeks=1)
+
+    print(f'Week Number: {week_number}')
+    return sprint_start, sprint_end
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
     sprint_commits = []
