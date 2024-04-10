@@ -1,9 +1,11 @@
 import re
 import subprocess
+
 from github import Github
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
+
 
 
 def get_sprintdates():
@@ -19,8 +21,6 @@ def get_sprintdates():
     # today = datetime(2024, 1, 21, tzinfo=timezone.utc) # 2024-02-12 to 2024-02-23
     # today = datetime(2024, 2, 10, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
     #today = datetime(2023, 6, 14, tzinfo=timezone.utc) # 2024-01-29 to 2024-02-09
-
-
 
     first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
     full_weeks_since_year_start = (today - first_day_of_year).days // 7
@@ -56,7 +56,28 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
         commits = repo.get_commits(since=sprint_start_date, until=sprint_end_date, sha=dev_branch.commit.sha)
         for commit in commits:
             commit_date = commit.commit.author.date
-            sprint_commits.append(('dev', commit_date, commit.commit.message.split('\n')[0]))
+            #sprint_commits.append(('dev', commit_date, commit.commit.message.split('\n')[0]))
+            '''
+            sprint_commits.append(('dev', commit_date, commit.commit.message.split('\n\n')))
+
+            all_paragraphs=commit.commit.message.split('\n\n')
+            print(f'all {all_paragraphs}')
+            first_paragraph=all_paragraphs[0] if all_paragraphs else ''
+            print(f'first {first_paragraph}')
+            print(f' AJKSNDJNASDJ {commit.commit.pull_request.html_url}')
+            '''
+            count=0
+            for pull in commit.get_pulls():
+
+                full_description=pull.body.split('\n')
+                ##concatates title and message if message exists, otherwise just title of pr
+                ##full description edited to get lines up to third newline charachter cus otherwise would sometimes just output title eg just  ##Overview
+                commit_title=[commit.commit.message.split('\n')[0]]
+                message = f'{commit_title}, Message : {full_description}' if full_description else commit_title
+            sprint_commits.append(('dev', commit_date, message))
+
+
+
 
 
     except Exception as e:
@@ -94,8 +115,7 @@ def print_commits():
         print('No Github Token')
         if not (envpath):
             with open('.env', 'w') as fh:
-                github_token = input(
-                    'Please enter your GitHub personal access token so that it can be stored for later use: ')
+                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
                 fh.write(f'GITHUB_TOKEN={github_token}')
                 print('If you are pushing commits to this code, remember to add your .env file to .gitignore')
 
@@ -109,15 +129,20 @@ def print_commits():
         try:
             ##stores the date, title,and branch in commits in branch dev from sprint period
             out,errors = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
+            team=org.get_team_by_slug('Deployers')
+            permission=team.get_repo_permission(repo)
+
             ##appends errorlist with error messages that are not empty
             if(errors):
                 errorlist.extend(errors)
-
-            if (out):
+            ## This should ensure only branches where the user has pull permissions are printed out
+            if (out and permission.pull==True):
                 print(f"Repository: {repo.full_name}")
                 for branch_name, commit_date, commit_title in out:
                     formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     print(f'Branch: {branch_name}, Date: {formatted_date}, Title: {commit_title}')
+
+                print(permission)
                 print('=' * 50)
 
         except Exception as e:
