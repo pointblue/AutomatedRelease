@@ -81,7 +81,8 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
                 full_description=pull.body.split('\n')
                 ##concatates title and message if message exists, otherwise just title of pr
                 ##full description edited to get lines up to third newline charachter cus otherwise would sometimes just output title eg just  ##Overview
-                message = f'{[commit.commit.message.split('\n')[0]]}, Message : {full_description[:3]}' if full_description[:3] else [commit.commit.message.split('\n')[0]]
+                commit_title=[commit.commit.message.split('\n')[0]]
+                message = f'{commit_title}, Message : {full_description}' if full_description else commit_title
             sprint_commits.append(('dev', commit_date, message))
 
 
