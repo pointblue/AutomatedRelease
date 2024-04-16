@@ -54,6 +54,26 @@ def get_sprintdates():
     print(f'Week Number: {week_number}')
     return sprint_start, sprint_end
 
+def get_first_paragraph(full_description):
+
+    commit_message=full_description[0]
+    count=0
+    ## checks if chosen paragraph starts with a hash or is only a special charachter, then moves on to next element of full_description until correct message chosen
+    while(commit_message[0]=='#' or commit_message=='\n' or commit_message=='\r'):
+        count+=1
+        commit_message=full_description[count]
+
+    if(commit_message[0:1]=='\n' or commit_message[0:1]=='\r'):
+        commit_message=commit_message[1:]
+    if(commit_message):
+
+        return commit_message
+    else:
+        return 'NO COMMIT MESSAGE'
+
+
+
+
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
     sprint_commits = []
     errorlist=[]
@@ -65,25 +85,38 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
         commits = repo.get_commits(since=sprint_start_date, until=sprint_end_date, sha=dev_branch.commit.sha)
         for commit in commits:
             commit_date = commit.commit.author.date
-            #sprint_commits.append(('dev', commit_date, commit.commit.message.split('\n')[0]))
-            '''
-            sprint_commits.append(('dev', commit_date, commit.commit.message.split('\n\n')))
 
-            all_paragraphs=commit.commit.message.split('\n\n')
-            print(f'all {all_paragraphs}')
-            first_paragraph=all_paragraphs[0] if all_paragraphs else ''
-            print(f'first {first_paragraph}')
-            print(f' AJKSNDJNASDJ {commit.commit.pull_request.html_url}')
-            '''
+
             count=0
             for pull in commit.get_pulls():
 
                 full_description=pull.body.split('\n')
+               # print(full_description)
+                #print(f'MESSAGE IS {get_first_paragraph(full_description)}')
                 ##concatates title and message if message exists, otherwise just title of pr
                 ##full description edited to get lines up to third newline charachter cus otherwise would sometimes just output title eg just  ##Overview
                 commit_title=[commit.commit.message.split('\n')[0]]
-                message = f'{commit_title}, Message : {full_description}' if full_description else commit_title
-            sprint_commits.append(('dev', commit_date, message))
+                #print(get_pr_link(commit,pull,repo))
+                #print("YES")
+                ## message calls get_first_paragraph if pr has description, else just title
+                pr_link = pull.html_url
+
+                #message = f'{commit_title}, Message : {get_first_paragraph(full_description)} : {pr_link}' if full_description else commit_title
+
+                if(full_description):
+                    first_paragraph=get_first_paragraph(full_description)
+
+                    test_message_array=[]
+
+                    message = f'{commit_title}, Message : {first_paragraph} : {pr_link}'
+
+
+                else:
+                    message=f'{commit_title} :  {pr_link}'
+
+                
+
+                sprint_commits.append(('dev', commit_date, message))
 
 
 
@@ -147,9 +180,10 @@ def print_commits():
             ## This should ensure only branches where the user has pull permissions are printed out
             if (out and permission.pull==True):
                 print(f"Repository: {repo.full_name}")
-                for branch_name, commit_date, commit_title in out:
+                for branch_name, commit_date, commit_message in out:
                     formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
-                    print(f'Branch: {branch_name}, Date: {formatted_date}, Title: {commit_title}')
+                    print(f'Branch: {branch_name}, Date: {formatted_date}')
+                    print(f'Title: {commit_message}')
 
                 print(permission)
                 print('=' * 50)
