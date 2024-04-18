@@ -107,16 +107,21 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
                     first_paragraph=get_first_paragraph(full_description)
 
                     test_message_array=[]
-
+                    test_message_array.append(commit_title)
+                    test_message_array.append(first_paragraph)
+                    test_message_array.append(pr_link)
+                   # print(f'title {commit_title}')
+                    #print(f'Message : {first_paragraph}')
+                    #print(f'pr link : {pr_link}')
                     message = f'{commit_title}, Message : {first_paragraph} : {pr_link}'
 
 
                 else:
                     message=f'{commit_title} :  {pr_link}'
 
-                
 
-                sprint_commits.append(('dev', commit_date, message))
+
+                sprint_commits.append(('dev', commit_date, test_message_array))
 
 
 
