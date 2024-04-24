@@ -16,17 +16,15 @@ def get_sprintdates():
     first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
     full_weeks_since_year_start = (today - first_day_of_year).days // 7
 
-
-
+    ## We add a plus one because the integer divison can only find what week you are in by measuring how many full weeks have passed,
+    ## and so we still need to account for the current week we are in
     week_number =full_weeks_since_year_start + 1
 
-    ## checks if day sat or sunday to make sure  not included in past sprint
-    if today.weekday() == 5 or today.weekday()==6:
-        week_number+=1
+    
 
-    ##gets startcheck to right week
+    ##gets find_right_monday to right week
     find_right_monday = first_day_of_year + timedelta(weeks=week_number)
-    ##gets startcheck to the right monday(this shouldnt matter in 2024, i added in case other years mess somthing up)
+    ##gets find_right_monday to the right monday(this shouldnt matter in 2024, i added in case other years mess somthing up)
     find_right_monday = find_right_monday - timedelta(days=find_right_monday.weekday())
 
     ##moves to correct monday depending on whether it is even or odd week
@@ -56,11 +54,10 @@ def get_first_paragraph(full_description):
     #example is '\nexamplestring' or '\n' as its own element
     if(commit_message[0:1]=='\n' or commit_message[0:1]=='\r'):
         commit_message=commit_message[1:]
-    if(commit_message):
 
-        return commit_message
-    else:
-        return 'NO COMMIT MESSAGE'
+
+    return commit_message
+
 
 
 
@@ -72,7 +69,7 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
 
     try:
         dev_branch = repo.get_branch("dev")
-       
+
         commits = repo.get_commits(since=sprint_start_date, until=sprint_end_date, sha=dev_branch.commit.sha)
         for commit in commits:
             commit_date = commit.commit.author.date
