@@ -20,10 +20,11 @@ def get_sprintdates():
     ## and so we still need to account for the current week we are in
     week_number =full_weeks_since_year_start + 1
 
-    
+
 
     ##gets find_right_monday to right week
     find_right_monday = first_day_of_year + timedelta(weeks=week_number)
+
     ##gets find_right_monday to the right monday(this shouldnt matter in 2024, i added in case other years mess somthing up)
     find_right_monday = find_right_monday - timedelta(days=find_right_monday.weekday())
 
@@ -36,15 +37,47 @@ def get_sprintdates():
     print(f'Week Number: {week_number}')
     return sprint_start, sprint_end
 
+def get_bullet_points(full_description,i):
+    bullet_message=full_description[i]
+
+    if(full_description[i+1][0]=='-'):
+
+        for paragraph in (full_description[i+1:]):
+
+            if paragraph[0]=='-':
+                bullet_message+='\n'
+                bullet_message+=(paragraph)
+            else:
+                break
+    if(len(bullet_message)==0):
+        return False
+    else:
+
+        return bullet_message
+
+
+
+
+
+
+
 def get_first_paragraph(full_description):
 
     commit_message=full_description[0]
 
     ## checks if chosen paragraph starts with a hash or is only a special charachter, then moves on to next element of full_description until correct message chosen
-    for paragraph in full_description:
+    for i,paragraph in enumerate(full_description):
+
         if not(paragraph[0]=='#' or paragraph=='\n' or paragraph=='\r'):
 
-            commit_message=paragraph
+
+            if get_bullet_points(full_description,i):
+                commit_message=paragraph
+                
+                commit_message+=get_bullet_points(full_description,i)
+            else:
+
+                commit_message=paragraph
             break
 
     ## before full_description passed to this function
@@ -87,8 +120,8 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
                     message=f'{commit_title} :  {pr_link}'
 
 
-
-                sprint_commits.append(('dev', commit_date, commit_title,message,pr_link))
+                if('Merge'in commit_title[0]):
+                    sprint_commits.append(('dev', commit_date, commit_title,message,pr_link))
 
 
 
@@ -148,13 +181,14 @@ def print_commits():
 
 
                 print('='*50)
+                print(f"Repository: {repo.full_name}")
                 for branch_name, commit_date, commit_title,commit_message,pr_link in out:
                     formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                    #if('Merge' in commit_title[0]):
                     print('_' * 50)
-                    print(f"Repository: {repo.full_name}")
+
                     print(f'Branch: {branch_name}')
                     print(f'Date: {formatted_date}')
-
 
                     print(f'Title: {commit_title[0]}')
                     print(f'Description: \n{commit_message}')
