@@ -12,7 +12,7 @@ def get_sprintdates():
     today = datetime.now(timezone.utc)
 
 
-    #today=datetime(2024,5,12,tzinfo=timezone.utc)
+
     first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
     full_weeks_since_year_start = (today - first_day_of_year).days // 7
 
@@ -39,14 +39,11 @@ def get_sprintdates():
 
 def get_bullet_points(full_description,i):
     bullet_message=full_description[i]
-    #print(f'BULLET MESSAGE START{bullet_message}')
+
     if(full_description[i+1][0]=='-'):
-        #print("ENTERS LOOP")
+
         for paragraph in (full_description[i+1:]):
-            #print('*' * 50)
-           # print(f'paragraph {paragraph}')
-            #print(paragraph[0])
-            #print('*' * 50)
+
             if paragraph[0]=='-':
                 bullet_message+='\n'
                 bullet_message+=(paragraph)
@@ -55,7 +52,7 @@ def get_bullet_points(full_description,i):
     if(len(bullet_message)==0):
         return False
     else:
-        #print(f"BULLET MESSWAGE END{bullet_message}")
+
         return bullet_message
 
 
@@ -76,8 +73,7 @@ def get_first_paragraph(full_description):
 
             if get_bullet_points(full_description,i):
                 commit_message=paragraph
-                #for message in get_bullet_points(full_description,i):
-                    #commit_message+=(message)
+                
                 commit_message+=get_bullet_points(full_description,i)
             else:
 
