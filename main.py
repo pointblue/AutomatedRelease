@@ -10,18 +10,33 @@ import os
 
 def get_sprintdates():
     today = datetime.now(timezone.utc)
+    
+
+    iso_calendar_info = today.isocalendar()
+
+    # Extract the week number from the ISO calendar information
+    week_number = iso_calendar_info[1]
+    first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
+
+    #if first day of year is thursday or later, the isocalendar method i am using will not count that week as a week
+    ##so this code counts it as a week if it starts on any day other than saturday
+
+    if first_day_of_year.isocalendar()[2] > 4 and first_day_of_year.isocalendar()[2]<7:
+        # Increment the week number by 1
+        week_number+=1
+
+
 
 
     #today=datetime(2024,5,12,tzinfo=timezone.utc)
-    first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
-    full_weeks_since_year_start = (today - first_day_of_year).days // 7
-
-    ## We add a plus one because the integer divison can only find what week you are in by measuring how many full weeks have passed,
-    ## and so we still need to account for the current week we are in
-    week_number =full_weeks_since_year_start + 1
+    
 
 
 
+
+    if(first_day_of_year.weekday()==6):
+        while first_day_of_year.weekday() != 0:  # 0 represents Monday
+            first_day_of_year += timedelta(days=1)
     ##gets find_right_monday to right week
     find_right_monday = first_day_of_year + timedelta(weeks=week_number)
 
@@ -34,7 +49,7 @@ def get_sprintdates():
     sprint_start = find_right_monday
     sprint_end = sprint_start + timedelta(days=4) + timedelta(weeks=1)
 
-    print(f'Week Number: {week_number}')
+    print(f'Week number {week_number}')
     return sprint_start, sprint_end
 
 def get_bullet_points(full_description,i):
