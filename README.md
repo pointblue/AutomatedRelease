@@ -1,6 +1,11 @@
 # AutomatedRelease
 
 
+This repo is designed to output commits in the last 2 weeks for every repo with a branch 'dev'. It is meant to provide an easy way for developers to keep track of changes made during Agile sprint periods.The script outputs
+to a terminal the date of the last commit for each dev branch, the title of the commit, the description associated with the commit PR, and the link to the PR.  If you do not already have a .env file configured for this repo, 
+one will be
+created and configured for you. 
+
 ## Authentication Instructions
 	
  1.  Github Token Verification
@@ -16,14 +21,6 @@
   * If a dotenv file does not already exist, you will be prompted to enter your GitHub token
   * A env file will then be created with your token saved inside
   * If you are pushing commits to this code, remember to ensure your dotenv file is in .gitignore
-
-  
-
-## What does this repo do?
-This repo is designed to output commits in the last 2 weeks for every repo with a branch 'dev'. The repo also outputs
-the date of the last commit for each dev branch. If you do not already have a .env file configured for this repo, 
-one will be
-created and configured for you.
 
 
 
