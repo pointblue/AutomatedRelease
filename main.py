@@ -120,8 +120,7 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
                     message=f'{commit_title} :  {pr_link}'
 
 
-                if('Merge'in commit_title[0]):
-                    sprint_commits.append(('dev', commit_date, commit_title,message,pr_link))
+                sprint_commits.append(('dev', commit_date, commit_title,message,pr_link))
 
 
 
