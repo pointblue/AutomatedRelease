@@ -11,17 +11,19 @@ created and configured for you.
  1.  Github Token Verification
    - You need a GitHub Personal Access Token to authenticate Python with GitHub. If you don't have a token, follow the steps below to generate one:
    - Visit [GitHub Personal Access Tokens](https://github.com/settings/tokens) page.
-   - Click on "Generate token" and provide the give access to 'repos' and 'read:org'
+   - Click on "Generate token" and provide the give access to 'read:org' and all permissions under 'repo'
    - Copy the generated token.
    - When prompted by the python file, enter your token 
 
  2.   Running the program
   * Clone the repo 'AutomatedRelease' to your machine
-  * Run the 'main' file
-  * If a dotenv file does not already exist, you will be prompted to enter your GitHub token
-  * A env file will then be created with your token saved inside
-  * If you are pushing commits to this code, remember to ensure your dotenv file is in .gitignore
-
+  * Install dependencies (listed below)
+    * `pip install PyGithub`
+    * `pip install python-dotenv`
+  * Run the `main.py` file: `python3 main.py`
+    * Note about Python aliases: depending on how Python is installed, you may need to run the above as `python main.py`
+  * If a `.env` file does not already exist, you will be prompted to enter your GitHub token and a `.env` file will be 
+created automatically
 
 
 ## Dependencies
