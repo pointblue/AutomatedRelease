@@ -32,52 +32,19 @@ def get_sprintdates():
     print(f'Week Number: {week_number}')
     return sprint_start, sprint_end
 
-def get_bullet_points(full_description,i):
-    bullet_message=full_description[i]
 
-    if(full_description[i+1][0]=='-'):
+def get_first_paragraph(description, pr_message):
+    # base case is full description has length of 1 or is followed by a new line
+    if len(description) == 1 or description[1] in ['\n', '\r']:
+        pr_message += description[0]
+        return pr_message
 
-        for paragraph in (full_description[i+1:]):
+    # handle bullet points, e.g. description is followed by -
+    elif description[1].startswith('-'):
+        pr_message += f'{description[0]}\n'
 
-            if paragraph[0]=='-':
-                bullet_message+='\n'
-                bullet_message+=(paragraph)
-            else:
-                break
-
-    if(len(bullet_message)==0):
-        return False
-    else:
-        return bullet_message
-
-
-def get_first_paragraph(full_description):
-    commit_message=full_description[0]
-
-    ## checks if chosen paragraph starts with a hash or is only a special charachter, then moves on to next element of full_description until correct message chosen
-    for i,paragraph in enumerate(full_description):
-
-        if not(paragraph[0]=='#' or paragraph=='\n' or paragraph=='\r'):
-
-
-            if get_bullet_points(full_description,i):
-                commit_message=paragraph
-                
-                commit_message+=get_bullet_points(full_description,i)
-            else:
-
-                commit_message=paragraph
-            break
-
-    ## before full_description passed to this function
-    #split('\n') used on it
-    # the split does not handle consecutive '\n's very well,
-    # causing them to either appear as their own element, or as the first charachters in a string
-    #example is '\nexamplestring' or '\n' as its own element
-    if(commit_message[0:1]=='\n' or commit_message[0:1]=='\r'):
-        commit_message=commit_message[1:]
-
-    return commit_message
+    # Otherwise, just try again with the second line
+    return get_first_paragraph(description[1:], pr_message)
 
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
@@ -101,7 +68,7 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
             pr_link = pull.html_url
 
             if(full_description):
-                first_paragraph=get_first_paragraph(full_description)
+                first_paragraph=get_first_paragraph(full_description, "")
                 message=first_paragraph
             else:
                 message=f'{commit_title} :  {pr_link}'
@@ -159,7 +126,7 @@ def print_commits():
                         print(f'Date: {formatted_date}')
 
                         print(f'Title: {commit_title}')
-                        print(f'Description: \n{commit_message}')
+                        print(f'Description: {commit_message}')
                         print(f'Link: {pr_link}')
                         print('_' * 50)
 
