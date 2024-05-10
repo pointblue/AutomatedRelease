@@ -1,7 +1,7 @@
 import re
 import subprocess
 
-from github import Github
+from github import Github, GithubException
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
@@ -52,7 +52,6 @@ def get_bullet_points(full_description,i):
 
 
 def get_first_paragraph(full_description):
-
     commit_message=full_description[0]
 
     ## checks if chosen paragraph starts with a hash or is only a special charachter, then moves on to next element of full_description until correct message chosen
@@ -83,7 +82,7 @@ def get_first_paragraph(full_description):
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
     sprint_commits = []
-    errorlist=[]
+    unique_prs = set()
 
     try:
         dev_branch = repo.get_branch("dev")
@@ -91,25 +90,31 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
         commits = repo.get_commits(since=sprint_start_date, until=sprint_end_date, sha=dev_branch.commit.sha)
         for commit in commits:
             commit_date = commit.commit.author.date
+            prs = commit.get_pulls()
+            for pull in prs:
+                unique_prs.add(pull)
 
-            for pull in commit.get_pulls():
-                ## gets array of paragraphs
-                full_description=pull.body.split('\n')
-                commit_title=[commit.commit.message.split('\n')[0]]
-                pr_link = pull.html_url
+        for pull in unique_prs:
+            ## gets array of paragraphs
+            full_description=pull.body.split('\n') if pull.body else None
+            commit_title=pull.title
+            pr_link = pull.html_url
 
-                if(full_description):
-                    first_paragraph=get_first_paragraph(full_description)
-                    message=first_paragraph
-                else:
-                    message=f'{commit_title} :  {pr_link}'
+            if(full_description):
+                first_paragraph=get_first_paragraph(full_description)
+                message=first_paragraph
+            else:
+                message=f'{commit_title} :  {pr_link}'
 
-                sprint_commits.append(('dev', commit_date, commit_title,message,pr_link))
+            sprint_commits.append((commit_date, commit_title,message,pr_link))
+
+    except GithubException as ge:
+        if not "Branch not found" in ge.data['message']:
+            print(f"Error in repository {repo.full_name}: {ge.data['message']}")
 
     except Exception as e:
-        ##outputs list of repos where no commits found, no dev branch
-        errorlist.append((repo.full_name,e))
-    return sprint_commits,errorlist
+        print(f"Error in repository {repo.full_name}: {e}")
+    return sprint_commits
 
 
 def print_commits():
@@ -144,25 +149,19 @@ def print_commits():
             ## This should ensure only branches where the team has pull permissions are printed out
             if (permission and permission.pull==True):
                 ##stores the date, title,and branch in commits in branch dev from sprint period
-                out,errors = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
+                out = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
 
                 if(out):
                     print('='*50)
                     print(f"Repository: {repo.full_name}")
-                    for branch_name, commit_date, commit_title,commit_message,pr_link in out:
+                    for commit_date, commit_title,commit_message,pr_link in out:
                         formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                         print(f'Date: {formatted_date}')
 
-                        print(f'Title: {commit_title[0]}')
+                        print(f'Title: {commit_title}')
                         print(f'Description: \n{commit_message}')
                         print(f'Link: {pr_link}')
                         print('_' * 50)
-
-                for error in errors:
-                    error_message = error[1].data['message']
-                    # filter out "branch not found" errors
-                    if not "Branch not found" in error_message:
-                        print(f"Error in repository {repo.full_name}: {error_message}")
 
         except Exception as e:
             print(f'Error fetching  for repo  {repo.full_name} : {e}')
