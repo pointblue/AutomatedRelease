@@ -7,6 +7,18 @@ from dotenv import load_dotenv
 import os
 import sys
 
+def get_gh_token():
+    github_token = os.getenv('GITHUB_TOKEN')
+    if not github_token:
+        envpath = os.path.exists('env')
+        print('No Github Token')
+        if not (envpath):
+            with open('.env', 'w') as fh:
+                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ').strip()
+                fh.write(f'GITHUB_TOKEN={github_token}')
+        else:
+            print('Please add your GitHub token to your dotenv file')
+    return github_token
 
 def get_sprintdates():
     today = datetime.now(timezone.utc)
@@ -97,17 +109,7 @@ def print_commits():
     org_name, team_name = parse_args()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
-    github_token = os.getenv('GITHUB_TOKEN')
-    if not github_token:
-        envpath = os.path.exists('env')
-        print('No Github Token')
-        if not (envpath):
-            with open('.env', 'w') as fh:
-                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
-                fh.write(f'GITHUB_TOKEN={github_token.strip()}')
-                print('If you are pushing commits to this code, remember to add your .env file to .gitignore')
-        else:
-            print('Please add your GitHub token to your dotenv file')
+    github_token = get_gh_token()
 
     g = Github(github_token)
     org = g.get_organization(org_name)
