@@ -7,11 +7,8 @@ from dotenv import load_dotenv
 import os
 
 
-
 def get_sprintdates():
     today = datetime.now(timezone.utc)
-
-
 
     first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
     full_weeks_since_year_start = (today - first_day_of_year).days // 7
@@ -19,8 +16,6 @@ def get_sprintdates():
     ## We add a plus one because the integer divison can only find what week you are in by measuring how many full weeks have passed,
     ## and so we still need to account for the current week we are in
     week_number =full_weeks_since_year_start + 1
-
-
 
     ##gets find_right_monday to right week
     find_right_monday = first_day_of_year + timedelta(weeks=week_number)
@@ -49,16 +44,11 @@ def get_bullet_points(full_description,i):
                 bullet_message+=(paragraph)
             else:
                 break
+
     if(len(bullet_message)==0):
         return False
     else:
-
         return bullet_message
-
-
-
-
-
 
 
 def get_first_paragraph(full_description):
@@ -88,17 +78,12 @@ def get_first_paragraph(full_description):
     if(commit_message[0:1]=='\n' or commit_message[0:1]=='\r'):
         commit_message=commit_message[1:]
 
-
     return commit_message
-
-
-
 
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
     sprint_commits = []
     errorlist=[]
-
 
     try:
         dev_branch = repo.get_branch("dev")
@@ -119,12 +104,7 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
                 else:
                     message=f'{commit_title} :  {pr_link}'
 
-
                 sprint_commits.append(('dev', commit_date, commit_title,message,pr_link))
-
-
-
-
 
     except Exception as e:
         ##outputs list of repos where no commits found, no dev branch
@@ -132,24 +112,13 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
     return sprint_commits,errorlist
 
 
-
 def print_commits():
-
-
     orgname = 'pointblue'
     errorlist=[]
     load_dotenv()
 
-    github_token = os.getenv('GITHUB_TOKEN')
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
-
-
-    sprint_start_date, sprint_end_date = get_sprintdates()
-
-
-
-
-    print(f'Current sprint: {sprint_start_date.strftime("%Y-%m-%d")} to {sprint_end_date.strftime("%Y-%m-%d")}')
+    github_token = os.getenv('GITHUB_TOKEN')
     if not github_token:
         envpath = os.path.exists('env')
         print('No Github Token')
@@ -158,61 +127,47 @@ def print_commits():
                 github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
                 fh.write(f'GITHUB_TOKEN={github_token}')
                 print('If you are pushing commits to this code, remember to add your .env file to .gitignore')
-
         else:
             print('Please add your GitHub token to your dotenv file')
 
     g = Github(github_token)
     org = g.get_organization(orgname)
 
+    sprint_start_date, sprint_end_date = get_sprintdates()
+    print(f'Current sprint: {sprint_start_date.strftime("%Y-%m-%d")} to {sprint_end_date.strftime("%Y-%m-%d")}')
+
     for repo in org.get_repos():
         try:
-            ##stores the date, title,and branch in commits in branch dev from sprint period
-            out,errors = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
             team=org.get_team_by_slug('Deployers')
             permission=team.get_repo_permission(repo)
 
-            ##appends errorlist with error messages that are not empty
-            if(errors):
-                errorlist.extend(errors)
-            ## This should ensure only branches where the user has pull permissions are printed out
-            if (out and permission.pull==True):
+            ## This should ensure only branches where the team has pull permissions are printed out
+            if (permission and permission.pull==True):
+                ##stores the date, title,and branch in commits in branch dev from sprint period
+                out,errors = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
 
+                if(out):
+                    print('='*50)
+                    print(f"Repository: {repo.full_name}")
+                    for branch_name, commit_date, commit_title,commit_message,pr_link in out:
+                        formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                        print(f'Date: {formatted_date}')
 
-                print('='*50)
-                print(f"Repository: {repo.full_name}")
-                for branch_name, commit_date, commit_title,commit_message,pr_link in out:
-                    formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
-                    #if('Merge' in commit_title[0]):
-                    print('_' * 50)
+                        print(f'Title: {commit_title[0]}')
+                        print(f'Description: \n{commit_message}')
+                        print(f'Link: {pr_link}')
+                        print('_' * 50)
 
-                    print(f'Branch: {branch_name}')
-                    print(f'Date: {formatted_date}')
-
-                    print(f'Title: {commit_title[0]}')
-                    print(f'Description: \n{commit_message}')
-                    print(f'Link: {pr_link}')
-                    print('_' * 50)
-
-
-                print('=' * 50)
+                for error in errors:
+                    error_message = error[1].data['message']
+                    # filter out "branch not found" errors
+                    if not "Branch not found" in error_message:
+                        print(f"Error in repository {repo.full_name}: {error_message}")
 
         except Exception as e:
             print(f'Error fetching  for repo  {repo.full_name} : {e}')
-    for repo,error in errorlist:
-        if isinstance(error, Exception):
-            if hasattr(error, 'data') and 'message' in error.data:
-                error_message = error.data['message']
-                if not "Branch not found" in error_message:
-                    print(f'Error in repository {repo}: {error}')
-        else:
-
-            pass
 
 
-
-
-        # Check if there are branches with no commits in the last two weeks and update last_commit_date
 print_commits()
 print('END')
 
