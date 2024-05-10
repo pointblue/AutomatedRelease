@@ -48,7 +48,7 @@ def get_first_paragraph(description, pr_message):
 
 
 def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
-    sprint_commits = []
+    sprint_prs = []
     unique_prs = set()
 
     try:
@@ -56,7 +56,7 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
 
         commits = repo.get_commits(since=sprint_start_date, until=sprint_end_date, sha=dev_branch.commit.sha)
         for commit in commits:
-            commit_date = commit.commit.author.date
+            pr_date = commit.commit.author.date
             prs = commit.get_pulls()
             for pull in prs:
                 unique_prs.add(pull)
@@ -64,16 +64,10 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
         for pull in unique_prs:
             ## gets array of paragraphs
             full_description=pull.body.split('\n') if pull.body else None
-            commit_title=pull.title
-            pr_link = pull.html_url
+            message = get_first_paragraph(full_description, "") if full_description else ""
+            author = pull.user.login
 
-            if(full_description):
-                first_paragraph=get_first_paragraph(full_description, "")
-                message=first_paragraph
-            else:
-                message=f'{commit_title} :  {pr_link}'
-
-            sprint_commits.append((commit_date, commit_title,message,pr_link))
+            sprint_prs.append((pr_date, pull.title, message, pull.html_url, author))
 
     except GithubException as ge:
         if not "Branch not found" in ge.data['message']:
@@ -81,12 +75,11 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
 
     except Exception as e:
         print(f"Error in repository {repo.full_name}: {e}")
-    return sprint_commits
+    return sprint_prs
 
 
 def print_commits():
     orgname = 'pointblue'
-    errorlist=[]
     load_dotenv()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
@@ -97,7 +90,7 @@ def print_commits():
         if not (envpath):
             with open('.env', 'w') as fh:
                 github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
-                fh.write(f'GITHUB_TOKEN={github_token}')
+                fh.write(f'GITHUB_TOKEN={github_token.strip()}')
                 print('If you are pushing commits to this code, remember to add your .env file to .gitignore')
         else:
             print('Please add your GitHub token to your dotenv file')
@@ -120,13 +113,13 @@ def print_commits():
 
                 if(out):
                     print('='*50)
-                    print(f"Repository: {repo.full_name}")
-                    for commit_date, commit_title,commit_message,pr_link in out:
-                        formatted_date = commit_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                    print(f"Repository: {repo.full_name}\n")
+                    for pr_date, pr_title, pr_message, pr_link, author in out:
+                        formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                         print(f'Date: {formatted_date}')
-
-                        print(f'Title: {commit_title}')
-                        print(f'Description: {commit_message}')
+                        print(f'Title: {pr_title}')
+                        print(f'Author: {author}')
+                        print(f'Description: {pr_message}')
                         print(f'Link: {pr_link}')
                         print('_' * 50)
 
