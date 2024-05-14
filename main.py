@@ -5,7 +5,20 @@ from github import Github, GithubException
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
+import sys
 
+def get_gh_token():
+    github_token = os.getenv('GITHUB_TOKEN')
+    if not github_token:
+        envpath = os.path.exists('env')
+        print('No Github Token')
+        if not (envpath):
+            with open('.env', 'w') as fh:
+                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ').strip()
+                fh.write(f'GITHUB_TOKEN={github_token}')
+        else:
+            print('Please add your GitHub token to your dotenv file')
+    return github_token
 
 def get_sprintdates():
     today = datetime.now(timezone.utc)
@@ -77,37 +90,44 @@ def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
         print(f"Error in repository {repo.full_name}: {e}")
     return sprint_prs
 
+def parse_args():
+    if len(sys.argv) < 2:
+        print("Missing organization name argument. Please provide an organization name: python3 main.py <org name>")
+        sys.exit()
+
+    org_name = sys.argv[1]
+    team_name = sys.argv[2] if len(sys.argv) > 2 else None
+    if team_name:
+        print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
+    else:
+        print(f"No team specified. Printing PRs for all repos in organization {org_name}\n")
+
+    return org_name, team_name
 
 def print_commits():
-    orgname = 'pointblue'
     load_dotenv()
+    org_name, team_name = parse_args()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
-    github_token = os.getenv('GITHUB_TOKEN')
-    if not github_token:
-        envpath = os.path.exists('env')
-        print('No Github Token')
-        if not (envpath):
-            with open('.env', 'w') as fh:
-                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ')
-                fh.write(f'GITHUB_TOKEN={github_token.strip()}')
-                print('If you are pushing commits to this code, remember to add your .env file to .gitignore')
-        else:
-            print('Please add your GitHub token to your dotenv file')
+    github_token = get_gh_token()
 
     g = Github(github_token)
-    org = g.get_organization(orgname)
+    org = g.get_organization(org_name)
 
     sprint_start_date, sprint_end_date = get_sprintdates()
     print(f'Current sprint: {sprint_start_date.strftime("%Y-%m-%d")} to {sprint_end_date.strftime("%Y-%m-%d")}')
 
     for repo in org.get_repos():
         try:
-            team=org.get_team_by_slug('Deployers')
-            permission=team.get_repo_permission(repo)
+            if team_name:
+                team = org.get_team_by_slug(team_name)
+                permission = team.get_repo_permission(repo)
+            else:
+                team, permission = None, None
 
-            ## This should ensure only branches where the team has pull permissions are printed out
-            if (permission and permission.pull==True):
+            ## get commits for all repos if team wasn't specified; otherwise, only if the given team has pull access to
+            ## the repo
+            if (not team or (permission and permission.pull==True)):
                 ##stores the date, title,and branch in commits in branch dev from sprint period
                 out = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
 
@@ -125,7 +145,6 @@ def print_commits():
 
         except Exception as e:
             print(f'Error fetching  for repo  {repo.full_name} : {e}')
-
 
 print_commits()
 print('END')
