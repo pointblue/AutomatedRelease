@@ -20,11 +20,10 @@ steps below to generate one:
  2.   Running the program
   * Clone the repo 'AutomatedRelease' to your machine
   * Install dependencies (listed below)
-    * `pip install PyGithub`
+    * `pip install httpx`
     * `pip install python-dotenv`
-  * This script has one required and one optional argument. **You must provide an organization name**. You may also provide 
-a team name.
-  * Run the `main.py` file: `python3 main.py <org name> <optional team name>`
+  * This script requires an organization name, and accepts an optional team and output format (`text` or `json`).
+  * Run the `main.py` file: `python3 main.py <org name> [team name] [format]`
     * Note about Python aliases: depending on how Python is installed, you may need to run the above via `python` rather
 than `python3`
   * If a `.env` file does not already exist, you will be prompted to enter your GitHub token and a `.env` file will be 
@@ -32,11 +31,10 @@ created automatically
 
 
 ## Dependencies
-1.   [PyGithub](https://pypi.org/project/PyGithub/)
+1.   [httpx](https://pypi.org/project/httpx/)
 2.   [python-dotenv](https://pypi.org/project/python-dotenv/)
 
 In order to run this program, you will need to have installed the proper dependencies.
 You can do this by opening an IDE and running the command `pip install {example_module}` for each dependency you are missing.
  
  
-
