@@ -1,9 +1,8 @@
-import re
-import subprocess
-
-from github import Github, GithubException
+import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+import httpx
 import os
 import sys
 
@@ -20,30 +19,34 @@ def get_gh_token():
             print('Please add your GitHub token to your dotenv file')
     return github_token
 
-def get_sprintdates():
-    today = datetime.now(timezone.utc)
+def _last_even_iso_week(year):
+    last_week = datetime(year, 12, 28).isocalendar()[1]
+    if last_week % 2 != 0:
+        last_week -= 1
+    return last_week
 
-    first_day_of_year = datetime(today.year, 1, 1, tzinfo=timezone.utc)
-    full_weeks_since_year_start = (today - first_day_of_year).days // 7
 
-    ## We add a plus one because the integer divison can only find what week you are in by measuring how many full weeks have passed,
-    ## and so we still need to account for the current week we are in
-    week_number =full_weeks_since_year_start + 1
+def get_sprintdates(now=None):
+    today = now or datetime.now(timezone.utc)
+    iso_year, iso_week, _ = today.isocalendar()
 
-    ##gets find_right_monday to right week
-    find_right_monday = first_day_of_year + timedelta(weeks=week_number)
+    if iso_week % 2 == 0:
+        sprint_end_week = iso_week
+        sprint_end_year = iso_year
+    else:
+        sprint_end_week = iso_week - 1
+        sprint_end_year = iso_year
 
-    ##gets find_right_monday to the right monday(this shouldnt matter in 2024, i added in case other years mess somthing up)
-    find_right_monday = find_right_monday - timedelta(days=find_right_monday.weekday())
+    if sprint_end_week < 1:
+        sprint_end_year -= 1
+        sprint_end_week = _last_even_iso_week(sprint_end_year)
 
-    ##moves to correct monday depending on whether it is even or odd week
-    find_right_monday -= timedelta(weeks=4) if week_number%2==0 else timedelta(weeks=3)
+    even_week_monday = datetime.fromisocalendar(sprint_end_year, sprint_end_week, 1)
+    sprint_start = (even_week_monday - timedelta(weeks=1)).replace(tzinfo=timezone.utc)
+    sprint_end = (even_week_monday + timedelta(days=6)).replace(tzinfo=timezone.utc)
 
-    sprint_start = find_right_monday
-    sprint_end = sprint_start + timedelta(days=4) + timedelta(weeks=1)
-
-    print(f'Week Number: {week_number}')
-    return sprint_start, sprint_end
+    print(f'Current Week Number: {iso_week}')
+    return sprint_start, sprint_end, sprint_end_year, sprint_end_week
 
 
 def get_first_paragraph(description, pr_message):
@@ -60,93 +63,177 @@ def get_first_paragraph(description, pr_message):
     return get_first_paragraph(description[1:], pr_message)
 
 
-def fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date):
-    sprint_prs = []
-    unique_prs = set()
-
-    try:
-        dev_branch = repo.get_branch("dev")
-
-        commits = repo.get_commits(since=sprint_start_date, until=sprint_end_date, sha=dev_branch.commit.sha)
-        for commit in commits:
-            pr_date = commit.commit.author.date
-            prs = commit.get_pulls()
-            for pull in prs:
-                unique_prs.add(pull)
-
-        for pull in unique_prs:
-            ## gets array of paragraphs
-            full_description=pull.body.split('\n') if pull.body else None
-            message = get_first_paragraph(full_description, "") if full_description else ""
-            author = pull.user.login
-
-            sprint_prs.append((pr_date, pull.title, message, pull.html_url, author))
-
-    except GithubException as ge:
-        if not "Branch not found" in ge.data['message']:
-            print(f"Error in repository {repo.full_name}: {ge.data['message']}")
-
-    except Exception as e:
-        print(f"Error in repository {repo.full_name}: {e}")
-    return sprint_prs
+def parse_github_datetime(value):
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
 
 def parse_args():
     if len(sys.argv) < 2:
-        print("Missing organization name argument. Please provide an organization name: python3 main.py <org name>")
+        print("Missing organization name argument. Please provide an organization name: python3 main.py <org name> [team name] [format]")
         sys.exit()
 
     org_name = sys.argv[1]
-    team_name = sys.argv[2] if len(sys.argv) > 2 else None
+    team_name = None
+    output_format = "text"
+
+    if len(sys.argv) > 2:
+        potential = sys.argv[2]
+        if potential.lower() in {"text", "json"}:
+            output_format = potential.lower()
+        else:
+            team_name = potential
+
+    if len(sys.argv) > 3:
+        output_format = sys.argv[3].lower()
+
+    if output_format not in {"text", "json"}:
+        print("Output format must be either 'text' or 'json'")
+        sys.exit(1)
+
     if team_name:
         print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
     else:
         print(f"No team specified. Printing PRs for all repos in organization {org_name}\n")
 
-    return org_name, team_name
+    print(f"Output format: {output_format}")
+    return org_name, team_name, output_format
 
-def print_commits():
+async def fetch_json_pages(client, url, params=None):
+    while url:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        yield response.json()
+        next_link = response.links.get("next", {}).get("url")
+        url, params = next_link, None
+
+
+async def get_repositories(client, org_name, team_name=None):
+    if team_name:
+        base_url = f"https://api.github.com/orgs/{org_name}/teams/{team_name}/repos"
+    else:
+        base_url = f"https://api.github.com/orgs/{org_name}/repos"
+    params = {"per_page": 100, "type": "all", "sort": "full_name"}
+    repos = []
+    async for page in fetch_json_pages(client, base_url, params=params):
+        repos.extend(page)
+    return repos
+
+
+async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date):
+    owner = repo["owner"]["login"]
+    name = repo["name"]
+    url = f"https://api.github.com/repos/{owner}/{name}/pulls"
+    params = {
+        "state": "closed",
+        "sort": "updated",
+        "direction": "desc",
+        "per_page": 100,
+    }
+
+    sprint_prs = []
+    async for page in fetch_json_pages(client, url, params=params):
+        if not page:
+            break
+
+        should_continue = False
+        for pull in page:
+            pr_date = parse_github_datetime(pull.get("merged_at") or pull.get("closed_at") or pull.get("updated_at"))
+            if not pr_date:
+                continue
+
+            if pr_date < sprint_start_date:
+                should_continue = False
+                break
+
+            if pr_date <= sprint_end_date:
+                body = pull.get("body") or ""
+                full_description = body.split('\n') if body else None
+                message = get_first_paragraph(full_description, "") if full_description else ""
+                author = pull.get("user", {}).get("login", "unknown")
+                sprint_prs.append((pr_date, pull.get("title", "Untitled PR"), message, pull.get("html_url"), author))
+
+            should_continue = True
+
+        if not should_continue:
+            break
+    return sprint_prs
+
+
+async def process_repository(client, repo, sprint_start_date, sprint_end_date, semaphore):
+    async with semaphore:
+        try:
+            prs = await fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date)
+            return repo, prs
+        except httpx.HTTPError as exc:
+            print(f"HTTP error while fetching repo {repo.get('full_name')}: {exc}")
+            return repo, []
+
+
+async def print_commits():
     load_dotenv()
-    org_name, team_name = parse_args()
+    org_name, team_name, output_format = parse_args()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
 
-    g = Github(github_token)
-    org = g.get_organization(org_name)
+    sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week = get_sprintdates()
+    version_label = f"v{sprint_end_year}.{sprint_end_week:02d}"
+    print(f'Showing items for: Sprint {version_label} ({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})')
 
-    sprint_start_date, sprint_end_date = get_sprintdates()
-    print(f'Current sprint: {sprint_start_date.strftime("%Y-%m-%d")} to {sprint_end_date.strftime("%Y-%m-%d")}')
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
 
-    for repo in org.get_repos():
-        try:
-            if team_name:
-                team = org.get_team_by_slug(team_name)
-                permission = team.get_repo_permission(repo)
-            else:
-                team, permission = None, None
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        repos = await get_repositories(client, org_name, team_name)
+        print(f"Discovered {len(repos)} repositories to scan\n")
 
-            ## get commits for all repos if team wasn't specified; otherwise, only if the given team has pull access to
-            ## the repo
-            if (not team or (permission and permission.pull==True)):
-                ##stores the date, title,and branch in commits in branch dev from sprint period
-                out = fetch_commits_within_sprint(repo, sprint_start_date, sprint_end_date)
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(process_repository(client, repo, sprint_start_date, sprint_end_date, semaphore))
+            for repo in repos
+        ]
 
-                if(out):
-                    print('='*50)
-                    print(f"Repository: {repo.full_name}\n")
-                    for pr_date, pr_title, pr_message, pr_link, author in out:
-                        formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
-                        print(f'Date: {formatted_date}')
-                        print(f'Title: {pr_title}')
-                        print(f'Author: {author}')
-                        print(f'Description: {pr_message}')
-                        print(f'Link: {pr_link}')
-                        print('_' * 50)
+        repo_results = []
+        for task in asyncio.as_completed(tasks):
+            repo, prs = await task
+            if prs:
+                repo_results.append((repo, prs))
 
-        except Exception as e:
-            print(f'Error fetching  for repo  {repo.full_name} : {e}')
+        if output_format == "json":
+            entries = []
+            for repo, prs in repo_results:
+                repo_name = repo.get('full_name')
+                for pr_date, pr_title, pr_message, pr_link, author in prs:
+                    entries.append({
+                        "repository": repo_name,
+                        "date": pr_date.isoformat(),
+                        "title": pr_title,
+                        "author": author,
+                        "description": pr_message,
+                        "link": pr_link,
+                    })
+            print(json.dumps(entries, indent=2))
+        else:
+            for repo, prs in repo_results:
+                print('='*50)
+                print(f"Repository: {repo.get('full_name')}\n")
+                for pr_date, pr_title, pr_message, pr_link, author in prs:
+                    formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                    print(f'Date: {formatted_date}')
+                    print(f'Title: {pr_title}')
+                    print(f'Author: {author}')
+                    print(f'Description: {pr_message}')
+                    print(f'Link: {pr_link}')
+                    print('_' * 50)
 
-print_commits()
-print('END')
+    print('END')
 
 
+if __name__ == "__main__":
+    asyncio.run(print_commits())
