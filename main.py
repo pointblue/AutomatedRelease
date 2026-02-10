@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import httpx
@@ -45,8 +46,7 @@ def get_sprintdates(now=None):
     sprint_start = (even_week_monday - timedelta(weeks=1)).replace(tzinfo=timezone.utc)
     sprint_end = (even_week_monday + timedelta(days=6)).replace(tzinfo=timezone.utc)
 
-    print(f'Current Week Number: {iso_week}')
-    return sprint_start, sprint_end, sprint_end_year, sprint_end_week
+    return sprint_start, sprint_end, sprint_end_year, sprint_end_week, iso_week
 
 
 def get_first_paragraph(description, pr_message):
@@ -93,12 +93,6 @@ def parse_args():
         print("Output format must be either 'text' or 'json'")
         sys.exit(1)
 
-    if team_name:
-        print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
-    else:
-        print(f"No team specified. Printing PRs for all repos in organization {org_name}\n")
-
-    print(f"Output format: {output_format}")
     return org_name, team_name, output_format
 
 async def fetch_json_pages(client, url, params=None):
@@ -153,7 +147,10 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
                 full_description = body.split('\n') if body else None
                 message = get_first_paragraph(full_description, "") if full_description else ""
                 author = pull.get("user", {}).get("login", "unknown")
-                sprint_prs.append((pr_date, pull.get("title", "Untitled PR"), message, pull.get("html_url"), author))
+                title = pull.get("title", "Untitled PR")
+                issue_match = re.search(r"(PBT-\d+)", title)
+                gitlab_issue = issue_match.group(1) if issue_match else None
+                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue))
 
             should_continue = True
 
@@ -179,9 +176,17 @@ async def print_commits():
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
 
-    sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week = get_sprintdates()
+    sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week, iso_week = get_sprintdates()
     version_label = f"v{sprint_end_year}.{sprint_end_week:02d}"
-    print(f'Showing items for: Sprint {version_label} ({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})')
+    sprint_label = f'Sprint {version_label} ({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})'
+    if output_format == "text":
+        if team_name:
+            print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
+        else:
+            print(f"No team specified. Printing PRs for all repos in organization {org_name}\n")
+        print(f"Showing items for: {sprint_label}")
+        print(f"Current Week Number: {iso_week}")
+        print(f"Output format: {output_format}")
 
     headers = {
         "Authorization": f"Bearer {github_token}",
@@ -191,7 +196,8 @@ async def print_commits():
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         repos = await get_repositories(client, org_name, team_name)
-        print(f"Discovered {len(repos)} repositories to scan\n")
+        if output_format == "text":
+            print(f"Discovered {len(repos)} repositories to scan\n")
 
         semaphore = asyncio.Semaphore(8)
         tasks = [
@@ -206,33 +212,49 @@ async def print_commits():
                 repo_results.append((repo, prs))
 
         if output_format == "json":
-            entries = []
+            repo_payload = []
             for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
-                for pr_date, pr_title, pr_message, pr_link, author in prs:
-                    entries.append({
-                        "repository": repo_name,
-                        "date": pr_date.isoformat(),
-                        "title": pr_title,
-                        "author": author,
-                        "description": pr_message,
-                        "link": pr_link,
-                    })
-            print(json.dumps(entries, indent=2))
+                repo_payload.append({
+                    "repository": repo_name,
+                    "pull_requests": [
+                        {
+                            "date": pr_date.isoformat(),
+                            "title": pr_title,
+                            "author": author,
+                            "description": pr_message,
+                            "link": pr_link,
+                            "gitlab_issue": gitlab_issue,
+                        }
+                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue in prs
+                    ],
+                })
+            payload = {
+                "organization": org_name,
+                "team": team_name,
+                "current_week_number": iso_week,
+                "sprint_label": sprint_label,
+                "release_prs": repo_payload,
+            }
+            print(json.dumps(payload, indent=2))
         else:
             for repo, prs in repo_results:
-                print('='*50)
-                print(f"Repository: {repo.get('full_name')}\n")
-                for pr_date, pr_title, pr_message, pr_link, author in prs:
+                repo_name = repo.get('full_name')
+                header = f"=== Repository: {repo_name} ==="
+                print(header)
+                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     print(f'Date: {formatted_date}')
                     print(f'Title: {pr_title}')
+                    if gitlab_issue:
+                        print(f'GitLab Issue: {gitlab_issue}')
                     print(f'Author: {author}')
                     print(f'Description: {pr_message}')
                     print(f'Link: {pr_link}')
-                    print('_' * 50)
+                    print('-' * len(header))
 
-    print('END')
+    if output_format == "text":
+        print('END')
 
 
 if __name__ == "__main__":
