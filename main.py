@@ -78,22 +78,29 @@ def parse_args():
     org_name = sys.argv[1]
     team_name = None
     output_format = "text"
+    branch_filter = "all"
 
-    if len(sys.argv) > 2:
-        potential = sys.argv[2]
-        if potential.lower() in {"text", "json"}:
-            output_format = potential.lower()
+    for arg in sys.argv[2:]:
+        lower = arg.lower()
+        if lower in {"text", "json"} and output_format == "text":
+            output_format = lower
+        elif lower in {"all", "release"} and branch_filter == "all":
+            branch_filter = lower
+        elif team_name is None:
+            team_name = arg
         else:
-            team_name = potential
-
-    if len(sys.argv) > 3:
-        output_format = sys.argv[3].lower()
+            print("Too many arguments provided. Usage: python3 main.py <org> [team] [format] [branch_filter]")
+            sys.exit(1)
 
     if output_format not in {"text", "json"}:
         print("Output format must be either 'text' or 'json'")
         sys.exit(1)
 
-    return org_name, team_name, output_format
+    if branch_filter not in {"all", "release"}:
+        print("Branch filter must be either 'all' (dev/main/master) or 'release' (main/master only)")
+        sys.exit(1)
+
+    return org_name, team_name, output_format, branch_filter
 
 async def fetch_json_pages(client, url, params=None):
     while url:
@@ -116,7 +123,7 @@ async def get_repositories(client, org_name, team_name=None):
     return repos
 
 
-async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date):
+async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches):
     owner = repo["owner"]["login"]
     name = repo["name"]
     url = f"https://api.github.com/repos/{owner}/{name}/pulls"
@@ -134,6 +141,9 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
 
         should_continue = False
         for pull in page:
+            base_branch = (pull.get("base") or {}).get("ref", "")
+            if base_branch not in allowed_branches:
+                continue
             pr_date = parse_github_datetime(pull.get("merged_at") or pull.get("closed_at") or pull.get("updated_at"))
             if not pr_date:
                 continue
@@ -159,10 +169,10 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
     return sprint_prs
 
 
-async def process_repository(client, repo, sprint_start_date, sprint_end_date, semaphore):
+async def process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore):
     async with semaphore:
         try:
-            prs = await fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date)
+            prs = await fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches)
             return repo, prs
         except httpx.HTTPError as exc:
             print(f"HTTP error while fetching repo {repo.get('full_name')}: {exc}")
@@ -171,7 +181,7 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, s
 
 async def print_commits():
     load_dotenv()
-    org_name, team_name, output_format = parse_args()
+    org_name, team_name, output_format, branch_filter = parse_args()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
@@ -187,6 +197,9 @@ async def print_commits():
         print(f"Showing items for: {sprint_label}")
         print(f"Current Week Number: {iso_week}")
         print(f"Output format: {output_format}")
+        print(f"Branch filter: {branch_filter}")
+
+    allowed_branches = {"dev", "main", "master"} if branch_filter == "all" else {"main", "master"}
 
     headers = {
         "Authorization": f"Bearer {github_token}",
@@ -201,7 +214,7 @@ async def print_commits():
 
         semaphore = asyncio.Semaphore(8)
         tasks = [
-            asyncio.create_task(process_repository(client, repo, sprint_start_date, sprint_end_date, semaphore))
+            asyncio.create_task(process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore))
             for repo in repos
         ]
 
@@ -234,6 +247,7 @@ async def print_commits():
                 "team": team_name,
                 "current_week_number": iso_week,
                 "sprint_label": sprint_label,
+                "branch_filter": branch_filter,
                 "release_prs": repo_payload,
             }
             print(json.dumps(payload, indent=2))

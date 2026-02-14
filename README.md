@@ -1,7 +1,7 @@
 # AutomatedRelease
 
-This repo provides a script designed to output merged PRs in the last 2 weeks for every repo with a branch 'dev' within 
-the given organization. Users may also optionally filter results by team. It is meant to provide an easy way for developers
+This repo provides a script designed to output merged PRs in the last 2 weeks for every repo within 
+the given organization. Users may optionally filter results by team, choose a JSON output format, and limit results to release branches. It is meant to provide an easy way for developers
 to view changes made during Agile sprint periods that are ready for release. The script outputs to a terminal the date of
 the last commit for each dev branch, the title and author of the PR, the first paragraph of the PR's description, and the link
 to the PR. If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
@@ -22,10 +22,14 @@ steps below to generate one:
   * Install dependencies (listed below)
     * `pip install httpx`
     * `pip install python-dotenv`
-  * This script requires an organization name, and accepts an optional team and output format (`text` or `json`).
-  * Run the `main.py` file: `python3 main.py <org name> [team name] [format]`
+  * This script requires an organization name, and accepts optional arguments for team, output format (`text` or `json`), and branch filter (`all` to include dev/main/master or `release` for main/master only).
+  * Run the `main.py` file: `python3 main.py <org name> [team name] [format] [branch filter]`
     * Note about Python aliases: depending on how Python is installed, you may need to run the above via `python` rather
 than `python3`
+    * Examples:
+      * `python3 main.py my-org text all` – text output, include dev/main/master.
+      * `python3 main.py my-org json release` – JSON output, only main/master merges.
+      * `python3 main.py my-org my-team release` – default text output for a specific team, release branches only.
   * If a `.env` file does not already exist, you will be prompted to enter your GitHub token and a `.env` file will be 
 created automatically
 
