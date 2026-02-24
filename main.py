@@ -84,7 +84,7 @@ def parse_args():
         lower = arg.lower()
         if lower in {"text", "json"} and output_format == "text":
             output_format = lower
-        elif lower in {"all", "release"} and branch_filter == "all":
+        elif lower in {"all", "release", "dev"} and branch_filter == "all":
             branch_filter = lower
         elif team_name is None:
             team_name = arg
@@ -96,8 +96,8 @@ def parse_args():
         print("Output format must be either 'text' or 'json'")
         sys.exit(1)
 
-    if branch_filter not in {"all", "release"}:
-        print("Branch filter must be either 'all' (dev/main/master) or 'release' (main/master only)")
+    if branch_filter not in {"all", "release", "dev"}:
+        print("Branch filter must be 'all' (dev/main/master), 'release' (main/master), or 'dev' (dev only)")
         sys.exit(1)
 
     return org_name, team_name, output_format, branch_filter
@@ -199,16 +199,23 @@ async def print_commits():
         print(f"Output format: {output_format}")
         print(f"Branch filter: {branch_filter}")
 
-    allowed_branches = {"dev", "main", "master"} if branch_filter == "all" else {"main", "master"}
+    if branch_filter == "all":
+        allowed_branches = {"dev", "main", "master"}
+    elif branch_filter == "dev":
+        allowed_branches = {"dev"}
+    else:
+        allowed_branches = {"main", "master"}
 
     headers = {
         "Authorization": f"Bearer {github_token}",
-        "Accept": "application/vnd.github+json",
+        "Accept": "application/vnd.github+json, application/vnd.github.mercy-preview+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         repos = await get_repositories(client, org_name, team_name)
+        deployable_repos = [repo for repo in repos if "deployer-php" in (repo.get("topics") or [])]
+        repos = deployable_repos
         if output_format == "text":
             print(f"Discovered {len(repos)} repositories to scan\n")
 
