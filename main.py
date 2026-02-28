@@ -1,4 +1,5 @@
 import asyncio
+import difflib
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -89,6 +90,50 @@ def parse_github_datetime(value):
         value = value[:-1] + "+00:00"
     return datetime.fromisoformat(value).astimezone(timezone.utc)
 
+
+def parse_week_value(week_value):
+    """
+    Parse week filter values:
+    - Single sprint end week: YYYY.WW
+    - Same-year range: YYYY.WW-WW
+    - Cross-year range: YYYY.WW-YYYY.WW
+    Returns a dict describing the parsed mode.
+    """
+    def _parse_year_week(token):
+        year_str, week_num_str = token.split(".")
+        year = int(year_str)
+        week_num = int(week_num_str)
+        if week_num < 1 or week_num > 53:
+            raise ValueError
+        # Validate ISO week/year combination.
+        datetime.fromisocalendar(year, week_num, 1)
+        return year, week_num
+
+    if "-" not in week_value:
+        year, week_num = _parse_year_week(week_value)
+        if week_num % 2 != 0:
+            raise ValueError("single_week_must_be_even")
+        return {"mode": "single", "start": (year, week_num), "end": None}
+
+    start_token, end_token = week_value.split("-", 1)
+    start_year, start_week = _parse_year_week(start_token)
+
+    if "." in end_token:
+        end_year, end_week = _parse_year_week(end_token)
+    else:
+        end_year = start_year
+        end_week = int(end_token)
+        if end_week < 1 or end_week > 53:
+            raise ValueError
+        datetime.fromisocalendar(end_year, end_week, 1)
+
+    start_date = datetime.fromisocalendar(start_year, start_week, 1)
+    end_date = datetime.fromisocalendar(end_year, end_week, 7)
+    if end_date < start_date:
+        raise ValueError("end_before_start")
+
+    return {"mode": "range", "start": (start_year, start_week), "end": (end_year, end_week)}
+
 def parse_args():
     env_org_name = os.getenv("ORG_NAME")
     env_team_name = os.getenv("TEAM_NAME")
@@ -97,7 +142,8 @@ def parse_args():
     team_name = None
     output_format = "json"
     branch_filter = "all"
-    sprint_week = None
+    week_filter = None
+    repo_name_filter = None
 
     for arg in sys.argv[1:]:
         lower = arg.lower()
@@ -118,21 +164,20 @@ def parse_args():
                 print("Invalid branch argument. Use branch=all, branch=release, or branch=dev.")
                 sys.exit(1)
         elif lower.startswith("week="):
-            # Parse week argument in format: week=YYYY.WW (e.g., week=2026.08)
+            # Parse week argument:
+            # - week=YYYY.WW
+            # - week=YYYY.WW-WW
+            # - week=YYYY.WW-YYYY.WW
             try:
-                week_str = arg.split("=")[1]
-                year_str, week_num_str = week_str.split(".")
-                year = int(year_str)
-                week_num = int(week_num_str)
-                if week_num < 1 or week_num > 53:
-                    print("Week number must be between 1 and 53")
-                    sys.exit(1)
-                if week_num % 2 != 0:
-                    print("Week number must be even (sprint end week)")
-                    sys.exit(1)
-                sprint_week = (year, week_num)
-            except (ValueError, IndexError):
-                print("Invalid week format. Use week=YYYY.WW (e.g., week=2026.08)")
+                week_str = arg.split("=", 1)[1]
+                week_filter = parse_week_value(week_str)
+            except ValueError as exc:
+                if str(exc) == "single_week_must_be_even":
+                    print("For a single week, the week number must be even (sprint end week).")
+                elif str(exc) == "end_before_start":
+                    print("Invalid week range: end week must be on or after start week.")
+                else:
+                    print("Invalid week format. Use week=YYYY.WW, week=YYYY.WW-WW, or week=YYYY.WW-YYYY.WW")
                 sys.exit(1)
         elif lower.startswith(("org=", "org_name=", "org-name=")):
             try:
@@ -150,9 +195,17 @@ def parse_args():
             except ValueError:
                 print("Invalid team argument. Use team=<team name> (or team-name=<team name>).")
                 sys.exit(1)
+        elif lower.startswith(("name=", "repo=", "repo_name=", "repo-name=")):
+            try:
+                repo_name_filter = arg.split("=", 1)[1].strip()
+                if not repo_name_filter:
+                    raise ValueError
+            except ValueError:
+                print("Invalid name argument. Use name=<repo name> (or repo=<repo name>).")
+                sys.exit(1)
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 main.py [org=<org>] [team=<team>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW]")
+            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]")
             sys.exit(1)
 
     if org_name is None:
@@ -162,7 +215,7 @@ def parse_args():
 
     if not org_name:
         print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
-        print("Usage: python3 main.py [org=<org>] [team=<team>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW]")
+        print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]")
         sys.exit(1)
 
     if output_format not in {"text", "json"}:
@@ -173,7 +226,40 @@ def parse_args():
         print("Branch filter must be 'all' (dev/main/master), 'release' (main/master), or 'dev' (dev only)")
         sys.exit(1)
 
-    return org_name, team_name, output_format, branch_filter, sprint_week
+    if repo_name_filter and week_filter is None:
+        print("When using name=<repo>, you must also provide week=YYYY.WW, week=YYYY.WW-WW, or week=YYYY.WW-YYYY.WW.")
+        sys.exit(1)
+
+    return org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter
+
+
+def _select_repositories_by_name(repos, repo_name_filter):
+    target = repo_name_filter.strip().lower()
+    target_repo_name = target.split("/", 1)[-1]
+
+    exact_matches = [
+        repo for repo in repos
+        if repo.get("name", "").lower() == target_repo_name
+        or repo.get("full_name", "").lower() == target
+        or repo.get("full_name", "").lower().endswith(f"/{target_repo_name}")
+    ]
+    if exact_matches:
+        return exact_matches, None
+
+    by_name = {repo.get("name", "").lower(): repo for repo in repos if repo.get("name")}
+    by_full_name = {repo.get("full_name", "").lower(): repo for repo in repos if repo.get("full_name")}
+    candidates = list(by_name.keys()) + list(by_full_name.keys())
+    close = difflib.get_close_matches(target, candidates, n=1, cutoff=0.75)
+    if not close:
+        close = difflib.get_close_matches(target_repo_name, list(by_name.keys()), n=1, cutoff=0.75)
+
+    if close:
+        key = close[0]
+        matched_repo = by_name.get(key) or by_full_name.get(key)
+        if matched_repo:
+            return [matched_repo], matched_repo.get("full_name")
+
+    return [], None
 
 
 async def get_repositories(client, org_name, team_name=None):
@@ -209,7 +295,7 @@ async def fetch_repo_tags(client, owner, repo_name):
         return {}
 
 
-async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, release_branch):
+async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, release_branch, ignore_date_range=False):
     owner = repo["owner"]["login"]
     name = repo["name"]
     url = f"https://api.github.com/repos/{owner}/{name}/pulls"
@@ -225,7 +311,7 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
         if not page:
             break
 
-        should_continue = False
+        reached_before_sprint_window = False
         for pull in page:
             base_branch = (pull.get("base") or {}).get("ref", "")
             if base_branch not in allowed_branches:
@@ -234,11 +320,11 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
             if not pr_date:
                 continue
 
-            if pr_date < sprint_start_date:
-                should_continue = False
+            if not ignore_date_range and pr_date < sprint_start_date:
+                reached_before_sprint_window = True
                 break
 
-            if pr_date <= sprint_end_date:
+            if ignore_date_range or pr_date <= sprint_end_date:
                 body = pull.get("body") or ""
                 full_description = body.split('\n') if body else None
                 message = get_first_paragraph(full_description, "") if full_description else ""
@@ -260,14 +346,12 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
 
                 sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags, merge_commit_sha, in_release_branch))
 
-            should_continue = True
-
-        if not should_continue:
+        if reached_before_sprint_window:
             break
     return sprint_prs
 
 
-async def process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore):
+async def process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore, ignore_date_range=False):
     async with semaphore:
         try:
             owner = repo["owner"]["login"]
@@ -276,7 +360,16 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
             commit_to_tags = await fetch_repo_tags(client, owner, name)
             # Get the main or master branch
             release_branch = await get_main_or_master_branch(client, owner, name)
-            prs = await fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, release_branch)
+            prs = await fetch_prs_within_sprint(
+                client,
+                repo,
+                sprint_start_date,
+                sprint_end_date,
+                allowed_branches,
+                commit_to_tags,
+                release_branch,
+                ignore_date_range=ignore_date_range,
+            )
             return repo, prs, release_branch
         except httpx.HTTPError as exc:
             print(f"HTTP error while fetching repo {repo.get('full_name')}: {exc}")
@@ -285,15 +378,31 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
 
 async def print_commits():
     load_dotenv()
-    org_name, team_name, output_format, branch_filter, sprint_week = parse_args()
+    org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter = parse_args()
     deployable_topic = get_deployable_topic()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
 
-    sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week, iso_week = get_sprintdates(target_week=sprint_week)
-    version_label = f"v{sprint_end_year}.{sprint_end_week:02d}"
-    sprint_label = f'Sprint {version_label} ({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})'
+    iso_year, iso_week, _ = datetime.now(timezone.utc).isocalendar()
+    if week_filter and week_filter["mode"] == "range":
+        start_year, start_week = week_filter["start"]
+        end_year, end_week = week_filter["end"]
+        sprint_start_date = datetime.fromisocalendar(start_year, start_week, 1).replace(tzinfo=timezone.utc)
+        sprint_end_date = datetime.fromisocalendar(end_year, end_week, 7).replace(tzinfo=timezone.utc)
+        if start_year == end_year:
+            version_label = f"v{start_year}.{start_week:02d}-{end_week:02d}"
+        else:
+            version_label = f"v{start_year}.{start_week:02d}-{end_year}.{end_week:02d}"
+        sprint_label = (
+            f'Weeks {version_label} '
+            f'({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})'
+        )
+    else:
+        target_week = week_filter["start"] if week_filter and week_filter["mode"] == "single" else None
+        sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week, iso_week = get_sprintdates(target_week=target_week)
+        version_label = f"v{sprint_end_year}.{sprint_end_week:02d}"
+        sprint_label = f'Sprint {version_label} ({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})'
     if output_format == "text":
         if team_name:
             print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
@@ -304,6 +413,10 @@ async def print_commits():
         print(f"Output format: {output_format}")
         print(f"Branch filter: {branch_filter}")
         print(f"Deployable topic: {deployable_topic}")
+        if week_filter and week_filter["mode"] == "range":
+            print(f"Week filter: {version_label}")
+        if repo_name_filter:
+            print(f"Repository name filter: {repo_name_filter}")
 
     if branch_filter == "all":
         allowed_branches = {"dev", "main", "master"}
@@ -322,12 +435,27 @@ async def print_commits():
         repos = await get_repositories(client, org_name, team_name)
         deployable_repos = [repo for repo in repos if deployable_topic in (repo.get("topics") or [])]
         repos = deployable_repos
+        matched_repo_name = None
+        if repo_name_filter:
+            repos, matched_repo_name = _select_repositories_by_name(repos, repo_name_filter)
         if output_format == "text":
+            if matched_repo_name:
+                print(f"Resolved repository to: {matched_repo_name}")
             print(f"Discovered {len(repos)} repositories to scan\n")
 
         semaphore = asyncio.Semaphore(8)
         tasks = [
-            asyncio.create_task(process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore))
+            asyncio.create_task(
+                process_repository(
+                    client,
+                    repo,
+                    sprint_start_date,
+                    sprint_end_date,
+                    allowed_branches,
+                    semaphore,
+                    ignore_date_range=False,
+                )
+            )
             for repo in repos
         ]
 
@@ -365,6 +493,10 @@ async def print_commits():
                 "current_week_number": iso_week,
                 "sprint_label": sprint_label,
                 "branch_filter": branch_filter,
+                "week_filter_mode": week_filter["mode"] if week_filter else "default",
+                "repo_name_filter": repo_name_filter,
+                "resolved_repo_name": matched_repo_name,
+                "date_filter": "sprint",
                 "release_prs": repo_payload,
             }
             print(json.dumps(payload, indent=2))

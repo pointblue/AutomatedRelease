@@ -34,14 +34,16 @@ steps below to generate one:
 
 This script retrieves merged PRs from the last 2-week sprint and outputs details including commit IDs, tags, and whether commits are in the release branch.
 
-**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW]`
+**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]`
 
 **Arguments:**
   - `[org=<org name>]` (optional) - GitHub organization name. If omitted, `ORG_NAME` from `.env` is used.
   - `[team=<team name>]` (optional) - Filter by specific team. If omitted, `TEAM_NAME` from `.env` is used when present.
+  - `[name=<repo name>]` (optional) - Filter output to one repository. Supports repository name (for example `my-service`) or full name (for example `my-org/my-service`). If no exact match is found, the closest repository name is used.
   - `[format=text|json]` (optional) - Output format. Defaults to `json`.
   - `[branch=all|release|dev]` (optional) - Branch filter. Defaults to `all` (dev/main/master).
-  - `[week=YYYY.WW]` (optional) - Specific sprint week (must be even number)
+  - `[week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]` (optional) - Week filter. Single week uses sprint behavior and must be even (end week). Range values include all dates from Monday of the start week through Sunday of the end week.
+  - `week=...` is required when `name=<repo name>` is provided.
 
 **Optional `.env` keys for `main.py`:**
   - `ORG_NAME=<your-org>`
@@ -55,6 +57,9 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
   * `python3 main.py format=json` – uses `ORG_NAME` from `.env`, outputs JSON
   * `python3 main.py org=my-org format=text week=2026.08` – text output for sprint ending in week 8 of 2026
   * `python3 main.py org=my-org team=my-team format=json week=2025.52` – JSON output for specific team and sprint
+  * `python3 main.py org=my-org name=my-service format=text week=2026.08` – text output for one repo in the specified sprint window
+  * `python3 main.py org=my-org name=my-service format=text week=2026.07-11` – one repo for ISO week range within 2026
+  * `python3 main.py org=my-org name=my-service format=text week=2025.50-2026.05` – one repo for ISO week range across years
 
 **Note:** Depending on how Python is installed, you may need to use `python` instead of `python3`
 
