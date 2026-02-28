@@ -41,7 +41,7 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
   - `[team=<team name>]` (optional) - Filter by specific team. If omitted, `TEAM_NAME` from `.env` is used when present.
   - `[name=<repo name>]` (optional) - Filter output to one repository. Supports repository name (for example `my-service`) or full name (for example `my-org/my-service`). If no exact match is found, the closest repository name is used.
   - `[format=text|json]` (optional) - Output format. Defaults to `json`.
-  - `[branch=all|release|dev]` (optional) - Branch filter. Defaults to `all` (dev/main/master).
+  - `[branch=all|release|dev]` (optional) - Branch filter. Defaults to `dev`.
   - `[week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]` (optional) - Week filter. Single week uses sprint behavior and must be even (end week). Range values include all dates from Monday of the start week through Sunday of the end week, interpreted in `DATE_RANGE_TZ_OFFSET`.
   - `[week-offset=<Nh|Nd|Nw>]` or `[offset=<Nh|Nd|Nw>]` (optional) - Shifts the date filter window by the offset. Examples: `1d`, `1w`, `12h`, `1.5h`.
   - `week=...` is required when `name=<repo name>` is provided.
@@ -53,8 +53,8 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
   - `DATE_RANGE_TZ_OFFSET=<timezone-offset>` (defaults to `0`; examples: `-8`, `5.5`, `+05:30`)
 
 **Examples:**
-  * `python3 main.py org=my-org` – JSON output, all branches, current sprint
-  * `python3 main.py org=my-org format=text` – text output, all branches, current sprint
+  * `python3 main.py org=my-org` – JSON output, dev branch only, current sprint
+  * `python3 main.py org=my-org format=text` – text output, dev branch only, current sprint
   * `python3 main.py org=my-org team=my-team format=json branch=dev` – JSON output for specific team, dev branch only
   * `python3 main.py format=json` – uses `ORG_NAME` from `.env`, outputs JSON
   * `python3 main.py org=my-org format=text week=2026.08` – text output for sprint ending in week 8 of 2026

@@ -222,7 +222,7 @@ def parse_args():
     org_name = None
     team_name = None
     output_format = "json"
-    branch_filter = "all"
+    branch_filter = "dev"
     week_filter = None
     repo_name_filter = None
     week_offset = timedelta(0)
