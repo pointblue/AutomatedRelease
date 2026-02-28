@@ -6,6 +6,8 @@ This repo provides scripts to help manage releases for Agile sprint periods:
 
 2. **`create-release-candidate.py`** - Creates release candidate PRs from dev to release branches for repositories with unreleased changes. Automatically determines the correct RC version number.
 
+3. **`create-release-notes.py`** - Generates markdown release notes for a sprint version by analyzing merged RC PRs and merge commits on release branches.
+
 Only repositories tagged with the `deployer-php` topic are considered deployable. If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
 
 ## Authentication Instructions
@@ -85,6 +87,53 @@ This script takes the JSON output from `main.py` and creates release candidate P
 **Requirements:**
   - Your GitHub token must have full `repo` permissions to create PRs
   - Repositories must have a `dev` branch
+
+### create-release-notes.py - Generate Release Notes
+
+This script generates markdown release notes for a sprint version (`vYYYY.WW`) across deployable repositories (`deployer-php` topic). It finds the latest merged RC PR for the target version, compares commits since the previous RC, and summarizes merged PRs.
+
+**Usage:** `python3 create-release-notes.py <org_name> [team_name] [week=YYYY.WW]`
+
+**Arguments:**
+  - `<org_name>` (required) - GitHub organization name
+  - `[team_name]` (optional) - Filter repositories by team
+  - `[week=YYYY.WW]` (optional) - Sprint end week (must be even). If omitted, current even week is used, or the most recent even week if the current week is odd.
+
+**Examples:**
+  * Current/most recent sprint notes for an organization:
+    ```bash
+    python3 create-release-notes.py my-org
+    ```
+  * Notes for a specific team:
+    ```bash
+    python3 create-release-notes.py my-org my-team
+    ```
+  * Notes for a specific sprint week:
+    ```bash
+    python3 create-release-notes.py my-org week=2026.08
+    ```
+  * Team + specific sprint week:
+    ```bash
+    python3 create-release-notes.py my-org my-team week=2026.08
+    ```
+
+**Output format:**
+  - Markdown grouped by repository
+  - Includes release branch, current RC PR, and previous RC PR (if any)
+  - Commit entries include:
+    - short commit SHA (plain text)
+    - PR link (`#<number>` links to GitHub PR)
+    - PR title
+    - first non-empty paragraph from the PR body
+  - Any `PBT-XXXX` references (4 digits) in rendered text are converted to GitLab issue links:
+    - `https://pblgssgitlab01.aws.pointblue.org/point-blue-engineering-team/point-blue-tech/-/issues/XXXX`
+
+**How it works:**
+  - Reads organization/team repositories and keeps deployable repos only (`deployer-php` topic)
+  - Detects the release branch (`main` or `master`)
+  - Looks for merged RC PRs matching the sprint version (for example `v2026.08-rc1`)
+  - Compares commits from the previous RC merge commit to the current RC merge commit range
+  - Excludes RC merge commits and formats merged PR data as release notes
 
 
 ## Dependencies
