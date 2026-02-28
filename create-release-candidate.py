@@ -5,20 +5,7 @@ import os
 import sys
 import re
 from dotenv import load_dotenv
-
-
-def get_gh_token():
-    github_token = os.getenv('GITHUB_TOKEN')
-    if not github_token:
-        envpath = os.path.exists('env')
-        print('No Github Token')
-        if not (envpath):
-            with open('.env', 'w') as fh:
-                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ').strip()
-                fh.write(f'GITHUB_TOKEN={github_token}')
-        else:
-            print('Please add your GitHub token to your dotenv file')
-    return github_token
+from github_utils import get_gh_token, fetch_json_pages
 
 
 def parse_args():
@@ -32,16 +19,6 @@ def parse_args():
         sys.exit(1)
 
     return json_file
-
-
-async def fetch_json_pages(client, url, params=None):
-    """Fetch paginated JSON responses from GitHub API."""
-    while url:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        yield response.json()
-        next_link = response.links.get("next", {}).get("url")
-        url, params = next_link, None
 
 
 async def get_existing_rc_version(client, owner, repo_name, version_prefix):

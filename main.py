@@ -6,19 +6,7 @@ from dotenv import load_dotenv
 import httpx
 import os
 import sys
-
-def get_gh_token():
-    github_token = os.getenv('GITHUB_TOKEN')
-    if not github_token:
-        envpath = os.path.exists('env')
-        print('No Github Token')
-        if not (envpath):
-            with open('.env', 'w') as fh:
-                github_token = input('Please enter your GitHub personal access token so that it can be stored for later use: ').strip()
-                fh.write(f'GITHUB_TOKEN={github_token}')
-        else:
-            print('Please add your GitHub token to your dotenv file')
-    return github_token
+from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch
 
 def _last_even_iso_week(year):
     last_week = datetime(year, 12, 28).isocalendar()[1]
@@ -151,14 +139,6 @@ def parse_args():
 
     return org_name, team_name, output_format, branch_filter, sprint_week
 
-async def fetch_json_pages(client, url, params=None):
-    while url:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        yield response.json()
-        next_link = response.links.get("next", {}).get("url")
-        url, params = next_link, None
-
 
 async def get_repositories(client, org_name, team_name=None):
     if team_name:
@@ -191,46 +171,6 @@ async def fetch_repo_tags(client, owner, repo_name):
         return commit_to_tags
     except Exception:
         return {}
-
-
-async def get_main_or_master_branch(client, owner, repo_name):
-    """Determine if repo uses 'main' or 'master' branch by checking which exists."""
-    try:
-        # Try 'main' first
-        url = f"https://api.github.com/repos/{owner}/{repo_name}/branches/main"
-        response = await client.get(url)
-        if response.status_code == 200:
-            return "main"
-    except httpx.HTTPError:
-        pass
-
-    try:
-        # Try 'master' if 'main' doesn't exist
-        url = f"https://api.github.com/repos/{owner}/{repo_name}/branches/master"
-        response = await client.get(url)
-        if response.status_code == 200:
-            return "master"
-    except httpx.HTTPError:
-        pass
-
-    return None
-
-
-async def check_commit_in_branch(client, owner, repo_name, commit_sha, branch):
-    """Check if a commit exists in a specific branch."""
-    try:
-        # Use the compare API to check if commit is in the branch
-        url = f"https://api.github.com/repos/{owner}/{repo_name}/compare/{branch}...{commit_sha}"
-        response = await client.get(url)
-        response.raise_for_status()
-        compare_data = response.json()
-
-        # If status is 'identical' or 'behind', the commit is in the branch
-        # If 'ahead', the commit is not yet in the branch
-        status = compare_data.get("status")
-        return status in ["identical", "behind"]
-    except httpx.HTTPError:
-        return False
 
 
 async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, release_branch):
