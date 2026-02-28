@@ -1,5 +1,5 @@
 import asyncio
-import json
+import difflib
 import httpx
 import os
 import sys
@@ -17,20 +17,43 @@ def _last_even_iso_week(year):
 
 
 def parse_args():
-    """Parse command line arguments."""
-    if len(sys.argv) < 2:
-        print("Missing organization name argument. Usage: python3 create-release-notes.py <org_name> [team_name] [week=YYYY.WW]")
-        sys.exit(1)
+    env_org_name = os.getenv("ORG_NAME")
+    env_team_name = os.getenv("TEAM_NAME")
 
-    org_name = sys.argv[1]
+    org_name = None
     team_name = None
+    repo_name_filter = None
     target_week = None
 
-    for arg in sys.argv[2:]:
-        if arg.startswith("week="):
-            # Parse week argument in format: week=YYYY.WW (e.g., week=2026.08)
+    for arg in sys.argv[1:]:
+        lower = arg.lower()
+        if lower.startswith(("org=", "org_name=", "org-name=")):
             try:
-                week_str = arg.split("=")[1]
+                org_name = arg.split("=", 1)[1]
+                if not org_name:
+                    raise ValueError
+            except ValueError:
+                print("Invalid org argument. Use org=<org name> (or org-name=<org name>).")
+                sys.exit(1)
+        elif lower.startswith(("team=", "team_name=", "team-name=")):
+            try:
+                team_name = arg.split("=", 1)[1]
+                if not team_name:
+                    raise ValueError
+            except ValueError:
+                print("Invalid team argument. Use team=<team name> (or team-name=<team name>).")
+                sys.exit(1)
+        elif lower.startswith(("name=", "repo=", "repo_name=", "repo-name=")):
+            try:
+                repo_name_filter = arg.split("=", 1)[1].strip()
+                if not repo_name_filter:
+                    raise ValueError
+            except ValueError:
+                print("Invalid name argument. Use name=<repo name> (or repo=<repo name>).")
+                sys.exit(1)
+        elif lower.startswith("week="):
+            try:
+                week_str = arg.split("=", 1)[1]
                 year_str, week_num_str = week_str.split(".")
                 year = int(year_str)
                 week_num = int(week_num_str)
@@ -44,11 +67,24 @@ def parse_args():
             except (ValueError, IndexError):
                 print("Invalid week format. Use week=YYYY.WW (e.g., week=2026.08)")
                 sys.exit(1)
-        elif team_name is None:
-            team_name = arg
         else:
-            print("Too many arguments. Usage: python3 create-release-notes.py <org_name> [team_name] [week=YYYY.WW]")
+            print("Unrecognized argument.")
+            print("Usage: python3 create-release-notes.py [org=<org>] [team=<team>] [name=<repo>] [week=YYYY.WW]")
             sys.exit(1)
+
+    if org_name is None:
+        org_name = env_org_name
+    if team_name is None:
+        team_name = env_team_name
+
+    if not org_name:
+        print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
+        print("Usage: python3 create-release-notes.py [org=<org>] [team=<team>] [name=<repo>] [week=YYYY.WW]")
+        sys.exit(1)
+
+    if repo_name_filter and target_week is None:
+        print("When using name=<repo>, you must also provide week=YYYY.WW.")
+        sys.exit(1)
 
     # If no week specified, use current or most recent even week
     if not target_week:
@@ -63,7 +99,36 @@ def parse_args():
                 week_num = _last_even_iso_week(iso_year)
             target_week = (iso_year, week_num)
 
-    return org_name, team_name, target_week
+    return org_name, team_name, repo_name_filter, target_week
+
+
+def _select_repositories_by_name(repos, repo_name_filter):
+    target = repo_name_filter.strip().lower()
+    target_repo_name = target.split("/", 1)[-1]
+
+    exact_matches = [
+        repo for repo in repos
+        if repo.get("name", "").lower() == target_repo_name
+        or repo.get("full_name", "").lower() == target
+        or repo.get("full_name", "").lower().endswith(f"/{target_repo_name}")
+    ]
+    if exact_matches:
+        return exact_matches, None
+
+    by_name = {repo.get("name", "").lower(): repo for repo in repos if repo.get("name")}
+    by_full_name = {repo.get("full_name", "").lower(): repo for repo in repos if repo.get("full_name")}
+    candidates = list(by_name.keys()) + list(by_full_name.keys())
+    close = difflib.get_close_matches(target, candidates, n=1, cutoff=0.75)
+    if not close:
+        close = difflib.get_close_matches(target_repo_name, list(by_name.keys()), n=1, cutoff=0.75)
+
+    if close:
+        key = close[0]
+        matched_repo = by_name.get(key) or by_full_name.get(key)
+        if matched_repo:
+            return [matched_repo], matched_repo.get("full_name")
+
+    return [], None
 
 
 async def get_repositories(client, org_name, team_name=None):
@@ -82,7 +147,8 @@ async def get_repositories(client, org_name, team_name=None):
 async def find_rc_prs(client, owner, repo_name, release_branch, version_prefix):
     """
     Find the current and previous RC PRs for this version.
-    Returns (current_rc_sha, current_rc_title, previous_rc_sha, previous_rc_title)
+    Returns (current_rc, previous_rc)
+    current_rc/previous_rc are dicts with: sha, title, pr_number, merged_at
     """
     try:
         url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls"
@@ -134,67 +200,78 @@ async def find_rc_prs(client, owner, repo_name, release_branch, version_prefix):
                     all_rcs.append((title, merge_commit_sha, pr_number, merged_date))
 
         if not current_rcs:
-            return None, None, None, None
+            return None, None
 
         # Sort current RCs by RC number descending
         current_rcs.sort(reverse=True)
         current_rc = current_rcs[0]
         current_sha = current_rc[2]
-        current_pr_link = f"[#{current_rc[3]}](https://github.com/{owner}/{repo_name}/pull/{current_rc[3]})"
+        current_pr_number = current_rc[3]
+        current_pr_link = f"[#{current_pr_number}](https://github.com/{owner}/{repo_name}/pull/{current_pr_number})"
         current_title = f"{current_rc[1]} (PR {current_pr_link})"
         current_merge_date = current_rc[4]
+        current_rc_info = {
+            "sha": current_sha,
+            "title": current_title,
+            "pr_number": current_pr_number,
+            "merged_at": current_merge_date,
+        }
 
         # Sort all RCs by merge date descending
         all_rcs.sort(key=lambda x: x[3], reverse=True)
 
         # Find the previous RC (first RC that's not the current version and was merged before current)
-        previous_sha = None
-        previous_title = None
+        previous_rc_info = None
         for title, merge_sha, pr_num, merge_date in all_rcs:
             if not current_pattern.match(title) and merge_date < current_merge_date:
                 # This is a different version merged before current - it's the previous one
-                previous_sha = merge_sha
                 previous_pr_link = f"[#{pr_num}](https://github.com/{owner}/{repo_name}/pull/{pr_num})"
-                previous_title = f"{title} (PR {previous_pr_link})"
+                previous_rc_info = {
+                    "sha": merge_sha,
+                    "title": f"{title} (PR {previous_pr_link})",
+                    "pr_number": pr_num,
+                    "merged_at": merge_date,
+                }
                 break
 
-        return current_sha, current_title, previous_sha, previous_title
+        return current_rc_info, previous_rc_info
 
     except Exception as e:
         print(f"Warning: Error finding RC PRs for {owner}/{repo_name}: {e}", file=sys.stderr)
-        return None, None, None, None
+        return None, None
 
 
-async def get_commit_range(client, owner, repo_name, release_branch, from_commit_sha):
+async def get_commit_range(client, owner, repo_name, from_commit_sha, to_commit_sha):
     """
-    Get all commits from from_commit_sha to HEAD of release branch.
-    Returns list of commit objects (only merge commits from PRs).
+    Get all commits between two RC merge commits.
+    Returns list of commit objects.
     """
     try:
-        if from_commit_sha:
-            url = f"https://api.github.com/repos/{owner}/{repo_name}/compare/{from_commit_sha}...{release_branch}"
-        else:
-            # No previous RC PR, get all commits on release branch
-            url = f"https://api.github.com/repos/{owner}/{repo_name}/commits"
-            params = {"sha": release_branch, "per_page": 100}
-            commits = []
-            async for page in fetch_json_pages(client, url, params=params):
-                commits.extend(page)
-            # Filter to only include merge commits (commits with more than 1 parent)
-            return [c for c in commits if len(c.get("parents", [])) > 1]
-
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/compare/{from_commit_sha}...{to_commit_sha}"
         response = await client.get(url)
         response.raise_for_status()
         compare_data = response.json()
-
-        commits = compare_data.get("commits", [])
-        # Filter to only include merge commits (commits with more than 1 parent)
-        merge_commits = [c for c in commits if len(c.get("parents", [])) > 1]
-
-        return merge_commits
-
+        return compare_data.get("commits", [])
     except Exception as e:
         print(f"Warning: Error getting commit range for {owner}/{repo_name}: {e}", file=sys.stderr)
+        return []
+
+
+async def get_pr_commits(client, owner, repo_name, pr_number):
+    """
+    Get commits that were part of a specific RC PR.
+    Used when there is no previous RC baseline.
+    """
+    try:
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls/{pr_number}/commits"
+        params = {"per_page": 100}
+        commits = []
+        async for page in fetch_json_pages(client, url, params=params):
+            commits.extend(page)
+        return commits
+
+    except Exception as e:
+        print(f"Warning: Error getting commits for PR #{pr_number} in {owner}/{repo_name}: {e}", file=sys.stderr)
         return []
 
 
@@ -264,41 +341,7 @@ def link_pbt_issues(text):
     )
 
 
-async def check_rc_exists(client, owner, repo_name, release_branch, version_prefix):
-    """
-    Check if there is a merged RC PR for this version prefix.
-    Returns True if an RC PR exists (merged), False otherwise.
-    """
-    try:
-        url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls"
-        params = {
-            "state": "closed",
-            "base": release_branch,
-            "sort": "updated",
-            "direction": "desc",
-            "per_page": 100,
-        }
-
-        pattern = re.compile(rf"^{re.escape(version_prefix)}-rc(\d+)$")
-
-        async for page in fetch_json_pages(client, url, params=params):
-            for pr in page:
-                merged_at = pr.get("merged_at")
-                if not merged_at:
-                    continue
-
-                # Check if this is an RC PR for this version
-                title = pr.get("title", "").strip()  # Remove leading/trailing whitespace
-                if pattern.match(title):
-                    return True
-
-        return False
-    except Exception as e:
-        print(f"Warning: Error checking RC PRs for {owner}/{repo_name}: {e}", file=sys.stderr)
-        return False
-
-
-async def process_repository(client, repo, version_prefix, sprint_start, sprint_end, semaphore):
+async def process_repository(client, repo, version_prefix, semaphore):
     """Process a single repository to generate release notes."""
     async with semaphore:
         try:
@@ -311,26 +354,22 @@ async def process_repository(client, repo, version_prefix, sprint_start, sprint_
             if not release_branch:
                 return None
 
-            # Check if there is a merged RC PR for this version
-            has_rc_pr = await check_rc_exists(client, owner, repo_name, release_branch, version_prefix)
-            if not has_rc_pr:
-                return None
-
             # Find the current and previous RC PRs
-            current_rc_sha, current_rc_title, previous_rc_sha, previous_rc_title = await find_rc_prs(client, owner, repo_name, release_branch, version_prefix)
+            current_rc, previous_rc = await find_rc_prs(client, owner, repo_name, release_branch, version_prefix)
 
-            if not current_rc_sha:
+            if not current_rc:
                 return None
 
-            # Get commits from previous RC to current RC
-            commits = await get_commit_range(client, owner, repo_name, release_branch, previous_rc_sha if previous_rc_sha else current_rc_sha)
+            # Build notes from RC-generated history:
+            # - If previous RC exists: commits between previous RC merge and current RC merge.
+            # - If no previous RC: commits included in the current RC PR itself.
+            if previous_rc:
+                commits = await get_commit_range(client, owner, repo_name, previous_rc["sha"], current_rc["sha"])
+            else:
+                commits = await get_pr_commits(client, owner, repo_name, current_rc["pr_number"])
 
-            if not commits:
-                # Still return the repo even if no commits, to show it was included
-                pass
-
-            # Extract PR information from merge commits
-            # Filter out RC merge commits (e.g., "Merge pull request #123 from org/dev v2026.10-rc0")
+            # Extract only PR-merge information from commits.
+            # Filter out RC commits and non-PR commits.
             rc_pattern = re.compile(r'v\d{4}\.\d{2}-rc\d+')
             pr_pattern = re.compile(r'Merge pull request #(\d+)')
 
@@ -345,45 +384,37 @@ async def process_repository(client, repo, version_prefix, sprint_start, sprint_
                 if rc_pattern.search(message):
                     continue
 
-                # Extract PR number from merge commit
+                # Keep only commits that are explicit PR merge commits.
                 pr_match = pr_pattern.search(message)
-                if pr_match:
-                    pr_number = pr_match.group(1)
-                    # Fetch the PR to get its title
-                    try:
-                        pr_url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls/{pr_number}"
-                        pr_response = await client.get(pr_url)
-                        pr_response.raise_for_status()
-                        pr_data = pr_response.json()
-                        pr_title = pr_data.get("title", "")
-                        pr_body = pr_data.get("body", "")
-                        pr_html_url = pr_data.get("html_url") or f"https://github.com/{full_name}/pull/{pr_number}"
-                        pr_first_paragraph = extract_first_non_empty_paragraph(pr_body)
+                if not pr_match:
+                    continue
 
-                        if pr_title:
-                            # Create GitHub commit URL
-                            commit_url = f"https://github.com/{full_name}/commit/{full_sha}"
-                            message = f"[#{pr_number}]({pr_html_url}): {pr_title}"
-                            if pr_first_paragraph:
-                                message += f" - {pr_first_paragraph}"
-                            message = link_pbt_issues(message)
-                            commit_notes.append({
-                                "sha": sha,
-                                "message": message,
-                                "url": commit_url
-                            })
-                    except Exception as e:
-                        # If we can't fetch the PR, fall back to using the commit message
-                        first_para = extract_first_paragraph(message)
-                        if first_para:
-                            commit_url = f"https://github.com/{full_name}/commit/{full_sha}"
-                            commit_notes.append({
-                                "sha": sha,
-                                "message": first_para,
-                                "url": commit_url
-                            })
-                else:
-                    # Not a merge commit, use the commit message
+                pr_number = pr_match.group(1)
+                # Fetch the PR to get its title/body details.
+                try:
+                    pr_url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls/{pr_number}"
+                    pr_response = await client.get(pr_url)
+                    pr_response.raise_for_status()
+                    pr_data = pr_response.json()
+                    pr_title = pr_data.get("title", "")
+                    pr_body = pr_data.get("body", "")
+                    pr_html_url = pr_data.get("html_url") or f"https://github.com/{full_name}/pull/{pr_number}"
+                    pr_first_paragraph = extract_first_non_empty_paragraph(pr_body)
+
+                    if pr_title:
+                        # Create GitHub commit URL
+                        commit_url = f"https://github.com/{full_name}/commit/{full_sha}"
+                        message = f"[#{pr_number}]({pr_html_url}): {pr_title}"
+                        if pr_first_paragraph:
+                            message += f" - {pr_first_paragraph}"
+                        message = link_pbt_issues(message)
+                        commit_notes.append({
+                            "sha": sha,
+                            "message": message,
+                            "url": commit_url
+                        })
+                except Exception:
+                    # Keep merge entry even if PR fetch fails.
                     first_para = extract_first_paragraph(message)
                     if first_para:
                         commit_url = f"https://github.com/{full_name}/commit/{full_sha}"
@@ -393,14 +424,11 @@ async def process_repository(client, repo, version_prefix, sprint_start, sprint_
                             "url": commit_url
                         })
 
-            if not commit_notes:
-                return None
-
             return {
                 "repo": full_name,
                 "release_branch": release_branch,
-                "current_rc": current_rc_title,
-                "previous_rc": previous_rc_title,
+                "current_rc": current_rc["title"],
+                "previous_rc": previous_rc["title"] if previous_rc else None,
                 "commits": commit_notes
             }
 
@@ -411,18 +439,12 @@ async def process_repository(client, repo, version_prefix, sprint_start, sprint_
 
 async def main():
     load_dotenv()
-    org_name, team_name, target_week = parse_args()
+    org_name, team_name, repo_name_filter, target_week = parse_args()
     github_token = get_gh_token()
     deployable_topic = get_deployable_topic()
 
     year, week_num = target_week
     version_prefix = f"v{year}.{week_num:02d}"
-
-    # Calculate sprint start and end dates
-    from datetime import timedelta
-    even_week_monday = datetime.fromisocalendar(year, week_num, 1).replace(tzinfo=timezone.utc)
-    sprint_start = (even_week_monday - timedelta(weeks=1))
-    sprint_end = (even_week_monday + timedelta(days=6))
 
     headers = {
         "Authorization": f"Bearer {github_token}",
@@ -434,11 +456,14 @@ async def main():
         # Get repositories
         repos = await get_repositories(client, org_name, team_name)
         deployable_repos = [repo for repo in repos if deployable_topic in (repo.get("topics") or [])]
+        resolved_repo_name = None
+        if repo_name_filter:
+            deployable_repos, resolved_repo_name = _select_repositories_by_name(deployable_repos, repo_name_filter)
 
         # Process repositories concurrently
         semaphore = asyncio.Semaphore(8)
         tasks = [
-            asyncio.create_task(process_repository(client, repo, version_prefix, sprint_start, sprint_end, semaphore))
+            asyncio.create_task(process_repository(client, repo, version_prefix, semaphore))
             for repo in deployable_repos
         ]
 
@@ -453,8 +478,12 @@ async def main():
 
         # Generate markdown output
         print(f"# Release Notes - {version_prefix}\n")
-        print(f"**Sprint Period:** {sprint_start.strftime('%B %d, %Y')} - {sprint_end.strftime('%B %d, %Y')}\n")
         print(f"**Organization:** {org_name}\n")
+        if repo_name_filter:
+            print(f"**Repository Filter:** {repo_name_filter}")
+            if resolved_repo_name:
+                print(f"**Resolved Repository:** {resolved_repo_name}")
+            print()
 
         if repo_results:
             for repo_data in repo_results:
@@ -471,7 +500,7 @@ async def main():
                     print(f"- `{commit['sha']}` {commit['message']}")
                 print()
         else:
-            print("*No repositories with merged PRs found for this sprint.*\n")
+            print(f"*No repositories with merged RC PRs found for {version_prefix}.*\n")
 
 
 if __name__ == "__main__":

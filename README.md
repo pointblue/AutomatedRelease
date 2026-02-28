@@ -104,31 +104,37 @@ This script takes the JSON output from `main.py` and creates release candidate P
 
 ### create-release-notes.py - Generate Release Notes
 
-This script generates markdown release notes for a sprint version (`vYYYY.WW`) across deployable repositories (topic from `DEPLOYABLE_TOPIC`, default `deployer-php`). It finds the latest merged RC PR for the target version, compares commits since the previous RC, and summarizes merged PRs.
+This script generates markdown release notes for a release version (`vYYYY.WW`) across deployable repositories (topic from `DEPLOYABLE_TOPIC`, default `deployer-php`). It finds merged RC PRs for the target version and builds notes from commits tied to those RC PRs.
 
-**Usage:** `python3 create-release-notes.py <org_name> [team_name] [week=YYYY.WW]`
+**Usage:** `python3 create-release-notes.py [org=<org name>] [team=<team name>] [name=<repo name>] [week=YYYY.WW]`
 
 **Arguments:**
-  - `<org_name>` (required) - GitHub organization name
-  - `[team_name]` (optional) - Filter repositories by team
-  - `[week=YYYY.WW]` (optional) - Sprint end week (must be even). If omitted, current even week is used, or the most recent even week if the current week is odd.
+  - `[org=<org name>]` (optional) - GitHub organization name. If omitted, `ORG_NAME` from `.env` is used.
+  - `[team=<team name>]` (optional) - Filter repositories by team. If omitted, `TEAM_NAME` from `.env` is used when present.
+  - `[name=<repo name>]` (optional) - Filter output to one repository. Supports repository name or full name. If no exact match is found, the closest repository name is used.
+  - `[week=YYYY.WW]` (optional) - Target release version week (must be even). If omitted, current even week is used, or the most recent even week if the current week is odd.
+  - `week=YYYY.WW` is required when `name=<repo name>` is provided.
 
 **Examples:**
-  * Current/most recent sprint notes for an organization:
+  * Current/most recent release notes for an organization:
     ```bash
-    python3 create-release-notes.py my-org
+    python3 create-release-notes.py org=my-org
     ```
   * Notes for a specific team:
     ```bash
-    python3 create-release-notes.py my-org my-team
+    python3 create-release-notes.py org=my-org team=my-team
     ```
-  * Notes for a specific sprint week:
+  * Notes for a specific release week:
     ```bash
-    python3 create-release-notes.py my-org week=2026.08
+    python3 create-release-notes.py org=my-org week=2026.08
     ```
-  * Team + specific sprint week:
+  * Team + specific release week:
     ```bash
-    python3 create-release-notes.py my-org my-team week=2026.08
+    python3 create-release-notes.py org=my-org team=my-team week=2026.08
+    ```
+  * One repository + specific release week:
+    ```bash
+    python3 create-release-notes.py org=my-org name=my-service week=2026.08
     ```
 
 **Output format:**
@@ -145,9 +151,10 @@ This script generates markdown release notes for a sprint version (`vYYYY.WW`) a
 **How it works:**
   - Reads organization/team repositories and keeps deployable repos only (topic from `DEPLOYABLE_TOPIC`, default `deployer-php`)
   - Detects the release branch (`main` or `master`)
-  - Looks for merged RC PRs matching the sprint version (for example `v2026.08-rc1`)
-  - Compares commits from the previous RC merge commit to the current RC merge commit range
-  - Excludes RC merge commits and formats merged PR data as release notes
+  - Looks for merged RC PRs matching the target version (for example `v2026.08-rc1`)
+  - Uses commits between the previous RC merge commit and the current RC merge commit
+  - If there is no previous RC, uses commits contained in the current RC PR
+  - Excludes RC commits and formats merged PR data as release notes
 
 
 ## Dependencies
