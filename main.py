@@ -28,9 +28,30 @@ def _last_even_iso_week(year):
 
 
 def get_sprintdates(now=None):
+    """
+    Calculate the current or most recent 2-week sprint dates based on even ISO week numbers.
+
+    Sprints run for 2 weeks, starting on the Monday of an odd ISO week and ending on the
+    Sunday of the following even ISO week. This function determines which sprint period
+    the current date falls into.
+
+    Args:
+        now: Optional datetime to use instead of current time (useful for testing)
+
+    Returns:
+        tuple: (sprint_start, sprint_end, sprint_end_year, sprint_end_week, iso_week)
+            - sprint_start: datetime of sprint start (Monday of odd week)
+            - sprint_end: datetime of sprint end (Sunday of even week)
+            - sprint_end_year: ISO year of the sprint end week
+            - sprint_end_week: ISO week number of the sprint end (always even)
+            - iso_week: Current ISO week number
+    """
     today = now or datetime.now(timezone.utc)
     iso_year, iso_week, _ = today.isocalendar()
 
+    # Determine the most recent even week (sprint end week)
+    # If we're in an even week, that's the sprint end
+    # If we're in an odd week, use the previous week as sprint end
     if iso_week % 2 == 0:
         sprint_end_week = iso_week
         sprint_end_year = iso_year
@@ -38,10 +59,15 @@ def get_sprintdates(now=None):
         sprint_end_week = iso_week - 1
         sprint_end_year = iso_year
 
+    # Handle edge case: if sprint_end_week becomes 0 or negative,
+    # we need to wrap to the previous year's last even week
     if sprint_end_week < 1:
         sprint_end_year -= 1
         sprint_end_week = _last_even_iso_week(sprint_end_year)
 
+    # Calculate actual dates from ISO week numbers
+    # Sprint ends on Sunday of the even week (day 7)
+    # Sprint starts on Monday of the previous (odd) week
     even_week_monday = datetime.fromisocalendar(sprint_end_year, sprint_end_week, 1)
     sprint_start = (even_week_monday - timedelta(weeks=1)).replace(tzinfo=timezone.utc)
     sprint_end = (even_week_monday + timedelta(days=6)).replace(tzinfo=timezone.utc)
