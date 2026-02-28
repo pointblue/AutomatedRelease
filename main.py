@@ -123,7 +123,28 @@ async def get_repositories(client, org_name, team_name=None):
     return repos
 
 
-async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches):
+async def fetch_repo_tags(client, owner, repo_name):
+    """Fetch all tags for a repository and return a mapping of commit SHA to tag names."""
+    try:
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/tags"
+        params = {"per_page": 100}
+        commit_to_tags = {}
+
+        async for page in fetch_json_pages(client, url, params=params):
+            for tag in page:
+                tag_name = tag.get("name", "")
+                commit_sha = tag.get("commit", {}).get("sha")
+                if commit_sha:
+                    if commit_sha not in commit_to_tags:
+                        commit_to_tags[commit_sha] = []
+                    commit_to_tags[commit_sha].append(tag_name)
+
+        return commit_to_tags
+    except Exception:
+        return {}
+
+
+async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags):
     owner = repo["owner"]["login"]
     name = repo["name"]
     url = f"https://api.github.com/repos/{owner}/{name}/pulls"
@@ -160,7 +181,12 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
                 title = pull.get("title", "Untitled PR")
                 issue_match = re.search(r"(PBT-\d+)", title)
                 gitlab_issue = issue_match.group(1) if issue_match else None
-                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue))
+
+                # Look up tags for the merge commit from pre-fetched mapping
+                merge_commit_sha = pull.get("merge_commit_sha")
+                tags = commit_to_tags.get(merge_commit_sha, []) if merge_commit_sha else []
+
+                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags))
 
             should_continue = True
 
@@ -172,7 +198,11 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
 async def process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore):
     async with semaphore:
         try:
-            prs = await fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches)
+            owner = repo["owner"]["login"]
+            name = repo["name"]
+            # Fetch tags once for the entire repo
+            commit_to_tags = await fetch_repo_tags(client, owner, name)
+            prs = await fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags)
             return repo, prs
         except httpx.HTTPError as exc:
             print(f"HTTP error while fetching repo {repo.get('full_name')}: {exc}")
@@ -245,8 +275,9 @@ async def print_commits():
                             "description": pr_message,
                             "link": pr_link,
                             "gitlab_issue": gitlab_issue,
+                            "tags": tags,
                         }
-                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue in prs
+                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags in prs
                     ],
                 })
             payload = {
@@ -263,7 +294,7 @@ async def print_commits():
                 repo_name = repo.get('full_name')
                 header = f"=== Repository: {repo_name} ==="
                 print(header)
-                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue in prs:
+                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     print(f'Date: {formatted_date}')
                     print(f'Title: {pr_title}')
@@ -272,6 +303,8 @@ async def print_commits():
                     print(f'Author: {author}')
                     print(f'Description: {pr_message}')
                     print(f'Link: {pr_link}')
+                    if tags:
+                        print(f'Tags: {", ".join(tags)}')
                     print('-' * len(header))
 
     if output_format == "text":
