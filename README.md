@@ -2,7 +2,7 @@
 
 This repo provides scripts to help manage releases for Agile sprint periods:
 
-1. **`main.py`** - Outputs merged PRs from the last 2-week sprint for every repo within the given organization. Shows PR details including commit IDs, tags, and whether commits are in the release branch (main/master).
+1. **`main.py`** - Outputs merged PRs from the last 2-week sprint for every repo within the given organization. Shows PR details including commit IDs and tags.
 
 2. **`create-release-candidate.py`** - Creates release candidate PRs from dev to release branches for repositories with unreleased changes. Automatically determines the correct RC version number.
 
@@ -32,7 +32,7 @@ steps below to generate one:
 
 ### main.py - View Sprint PRs
 
-This script retrieves merged PRs from the last 2-week sprint and outputs details including commit IDs, tags, and whether commits are in the release branch.
+This script retrieves merged PRs from the last 2-week sprint and outputs details including commit IDs and tags.
 
 **Usage:** `python3 main.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]`
 
@@ -92,7 +92,10 @@ This script takes the JSON output from `main.py` and creates release candidate P
 
 **How it works:**
   - Reads the sprint version from the JSON (e.g., `v2026.10`)
-  - For each repository with unreleased PRs (where `in_release_branch: false`):
+  - For each repository in the JSON input:
+    - Detects the release branch (`main` or `master`)
+    - Checks each PR merge commit from `main.py` output to see if it exists in the release branch
+  - For repositories with unreleased PR commits:
     - Checks for existing release candidate PRs (e.g., `v2026.10-rc0`, `v2026.10-rc1`)
     - Creates a new PR with the next RC number (e.g., `v2026.10-rc2`)
     - Creates PR from `dev` branch to release branch (`main` or `master`)

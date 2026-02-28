@@ -5,7 +5,7 @@ import os
 import sys
 import re
 from dotenv import load_dotenv
-from github_utils import get_gh_token, fetch_json_pages
+from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch
 
 
 def parse_args():
@@ -135,15 +135,35 @@ async def create_release_pr(client, owner, repo_name, release_branch, version_ti
         return False
 
 
-async def process_repository(client, repo_name, release_branch, version_prefix, semaphore, dry_run=False):
+async def has_unreleased_prs(client, owner, repo_name, release_branch, pull_requests):
+    """
+    Determine if any PR commit is not yet in the release branch.
+    """
+    for pr in pull_requests:
+        commit_id = pr.get("commit_id")
+        if not commit_id:
+            # If the source data does not include a commit id, treat as unreleased.
+            return True
+        in_release = await check_commit_in_branch(client, owner, repo_name, commit_id, release_branch)
+        if not in_release:
+            return True
+    return False
+
+
+async def process_repository(client, repo_name, pull_requests, version_prefix, semaphore, dry_run=False):
     """Process a single repository and create release candidate PR."""
     async with semaphore:
         try:
             owner, repo = repo_name.split("/")
 
+            release_branch = await get_main_or_master_branch(client, owner, repo)
             if not release_branch:
                 print(f"[WARNING] {repo_name}: No release branch found", file=sys.stderr)
-                return repo_name, False, None
+                return repo_name, False, None, "no_release_branch"
+
+            if not await has_unreleased_prs(client, owner, repo, release_branch, pull_requests):
+                print(f"[SKIP] {repo_name}: Skipping (all PRs already in {release_branch})", file=sys.stderr)
+                return repo_name, False, None, "all_released"
 
             # Check for existing RC PRs
             has_open_rc, open_rc_info, next_rc = await get_existing_rc_info(client, owner, repo, version_prefix)
@@ -154,16 +174,16 @@ async def process_repository(client, repo_name, release_branch, version_prefix, 
                 print(f"       PR #{open_rc_info['number']}: {open_rc_info['title']}")
                 print(f"       URL: {open_rc_info['url']}")
                 print(f"       Merge this PR before creating a new release candidate")
-                return repo_name, False, open_rc_info
+                return repo_name, False, open_rc_info, "open_rc_exists"
 
             version_title = f"{version_prefix}-rc{next_rc}"
             print(f"[PROCESSING] {repo_name}: Creating {version_title} (dev -> {release_branch})")
             success = await create_release_pr(client, owner, repo, release_branch, version_title, dry_run)
 
-            return repo_name, success, None
+            return repo_name, success, None, None
         except Exception as exc:
             print(f"[ERROR] Error processing {repo_name}: {exc}", file=sys.stderr)
-            return repo_name, False, None
+            return repo_name, False, None, "error"
 
 
 async def main():
@@ -208,28 +228,28 @@ async def main():
 
         for repo_data in input_data.get("release_prs", []):
             repo_name = repo_data.get("repository")
-            release_branch = repo_data.get("release_branch")
             pull_requests = repo_data.get("pull_requests", [])
 
-            # Only create RC PR if there are PRs that are NOT in the release branch
-            has_unreleased_prs = any(not pr.get("in_release_branch", True) for pr in pull_requests)
-
-            if repo_name and release_branch and has_unreleased_prs:
+            if repo_name:
                 task = asyncio.create_task(
-                    process_repository(client, repo_name, release_branch, version_prefix, semaphore, dry_run)
+                    process_repository(client, repo_name, pull_requests, version_prefix, semaphore, dry_run)
                 )
                 tasks.append(task)
-            elif repo_name and not has_unreleased_prs:
-                print(f"[SKIP] {repo_name}: Skipping (all PRs already in {release_branch})", file=sys.stderr)
 
         # Collect results
         results = []
         skipped_open_prs = []
+        skipped_all_released = 0
+        skipped_no_release_branch = 0
         for task in asyncio.as_completed(tasks):
-            repo_name, success, open_rc_info = await task
+            repo_name, success, open_rc_info, skip_reason = await task
             results.append((repo_name, success))
             if open_rc_info:
                 skipped_open_prs.append((repo_name, open_rc_info))
+            if skip_reason == "all_released":
+                skipped_all_released += 1
+            elif skip_reason == "no_release_branch":
+                skipped_no_release_branch += 1
 
         # Print summary
         print("\n" + "="*60)
@@ -237,10 +257,12 @@ async def main():
         print("="*60)
         successful = sum(1 for _, success in results if success)
         skipped = len(skipped_open_prs)
-        failed = len(results) - successful - skipped
+        failed = len(results) - successful - skipped - skipped_all_released - skipped_no_release_branch
         total = len(results)
-        print(f"Successful: {successful}/{total}")
+        print(f"Successful (created RC PRs): {successful}/{total}")
         print(f"Skipped (open RC exists): {skipped}/{total}")
+        print(f"Skipped (all PRs in release branch): {skipped_all_released}/{total}")
+        print(f"Skipped (no release branch): {skipped_no_release_branch}/{total}")
         print(f"Failed: {failed}/{total}")
 
         if skipped_open_prs:

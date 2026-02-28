@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import httpx
 import os
 import sys
-from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch, get_deployable_topic
+from github_utils import get_gh_token, fetch_json_pages, get_deployable_topic
 
 def _last_even_iso_week(year):
     last_week = datetime(year, 12, 28).isocalendar()[1]
@@ -385,7 +385,7 @@ async def fetch_repo_tags(client, owner, repo_name):
         return {}
 
 
-async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, release_branch, ignore_date_range=False):
+async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, ignore_date_range=False):
     owner = repo["owner"]["login"]
     name = repo["name"]
     url = f"https://api.github.com/repos/{owner}/{name}/pulls"
@@ -429,12 +429,7 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
                 merge_commit_sha = pull.get("merge_commit_sha")
                 tags = commit_to_tags.get(merge_commit_sha, []) if merge_commit_sha else []
 
-                # Check if commit is in release branch (main/master)
-                in_release_branch = False
-                if release_branch and merge_commit_sha:
-                    in_release_branch = await check_commit_in_branch(client, owner, name, merge_commit_sha, release_branch)
-
-                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags, merge_commit_sha, in_release_branch))
+                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags, merge_commit_sha))
 
         if reached_before_sprint_window:
             break
@@ -448,8 +443,6 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
             name = repo["name"]
             # Fetch tags once for the entire repo
             commit_to_tags = await fetch_repo_tags(client, owner, name)
-            # Get the main or master branch
-            release_branch = await get_main_or_master_branch(client, owner, name)
             prs = await fetch_prs_within_sprint(
                 client,
                 repo,
@@ -457,13 +450,12 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
                 sprint_end_date,
                 allowed_branches,
                 commit_to_tags,
-                release_branch,
                 ignore_date_range=ignore_date_range,
             )
-            return repo, prs, release_branch
+            return repo, prs
         except httpx.HTTPError as exc:
             print(f"HTTP error while fetching repo {repo.get('full_name')}: {exc}")
-            return repo, [], None
+            return repo, []
 
 
 async def print_commits():
@@ -562,17 +554,16 @@ async def print_commits():
 
         repo_results = []
         for task in asyncio.as_completed(tasks):
-            repo, prs, release_branch = await task
+            repo, prs = await task
             if prs:
-                repo_results.append((repo, prs, release_branch))
+                repo_results.append((repo, prs))
 
         if output_format == "json":
             repo_payload = []
-            for repo, prs, release_branch in repo_results:
+            for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
                 repo_payload.append({
                     "repository": repo_name,
-                    "release_branch": release_branch,
                     "pull_requests": [
                         {
                             "date": pr_date.isoformat(),
@@ -583,9 +574,8 @@ async def print_commits():
                             "gitlab_issue": gitlab_issue,
                             "tags": tags,
                             "commit_id": commit_id,
-                            "in_release_branch": in_release_branch,
                         }
-                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, in_release_branch in prs
+                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs
                     ],
                 })
             payload = {
@@ -604,11 +594,11 @@ async def print_commits():
             }
             print(json.dumps(payload, indent=2))
         else:
-            for repo, prs, release_branch in repo_results:
+            for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
                 header = f"=== Repository: {repo_name} ==="
                 print(header)
-                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, in_release_branch in prs:
+                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     print(f'Date: {formatted_date}')
                     print(f'Title: {pr_title}')
