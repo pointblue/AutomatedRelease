@@ -101,15 +101,21 @@ def parse_args():
 
     for arg in sys.argv[1:]:
         lower = arg.lower()
-        if lower in {"all", "release", "dev"} and branch_filter == "all":
-            branch_filter = lower
-        elif lower.startswith("format="):
+        if lower.startswith("format="):
             try:
                 output_format = arg.split("=", 1)[1].lower()
                 if output_format not in {"text", "json"}:
                     raise ValueError
             except ValueError:
                 print("Invalid format argument. Use format=text or format=json.")
+                sys.exit(1)
+        elif lower.startswith(("branch=", "branch_filter=", "branch-filter=")):
+            try:
+                branch_filter = arg.split("=", 1)[1].lower()
+                if branch_filter not in {"all", "release", "dev"}:
+                    raise ValueError
+            except ValueError:
+                print("Invalid branch argument. Use branch=all, branch=release, or branch=dev.")
                 sys.exit(1)
         elif lower.startswith("week="):
             # Parse week argument in format: week=YYYY.WW (e.g., week=2026.08)
@@ -146,7 +152,7 @@ def parse_args():
                 sys.exit(1)
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 main.py [org=<org>] [team=<team>] [format=text|json] [all|release|dev] [week=YYYY.WW]")
+            print("Usage: python3 main.py [org=<org>] [team=<team>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW]")
             sys.exit(1)
 
     if org_name is None:
@@ -156,7 +162,7 @@ def parse_args():
 
     if not org_name:
         print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
-        print("Usage: python3 main.py [org=<org>] [team=<team>] [format=text|json] [all|release|dev] [week=YYYY.WW]")
+        print("Usage: python3 main.py [org=<org>] [team=<team>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW]")
         sys.exit(1)
 
     if output_format not in {"text", "json"}:

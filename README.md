@@ -34,13 +34,13 @@ steps below to generate one:
 
 This script retrieves merged PRs from the last 2-week sprint and outputs details including commit IDs, tags, and whether commits are in the release branch.
 
-**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [format=text|json] [branch filter] [week=YYYY.WW]`
+**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW]`
 
 **Arguments:**
   - `[org=<org name>]` (optional) - GitHub organization name. If omitted, `ORG_NAME` from `.env` is used.
   - `[team=<team name>]` (optional) - Filter by specific team. If omitted, `TEAM_NAME` from `.env` is used when present.
   - `[format=text|json]` (optional) - Output format. Defaults to `json`.
-  - `[branch filter]` (optional) - Branch filter: `all` (default, dev/main/master), `dev` (dev only), or `release` (main/master only)
+  - `[branch=all|release|dev]` (optional) - Branch filter. Defaults to `all` (dev/main/master).
   - `[week=YYYY.WW]` (optional) - Specific sprint week (must be even number)
 
 **Optional `.env` keys for `main.py`:**
@@ -50,7 +50,7 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
 **Examples:**
   * `python3 main.py org=my-org` – JSON output, all branches, current sprint
   * `python3 main.py org=my-org format=text` – text output, all branches, current sprint
-  * `python3 main.py org=my-org team=my-team format=json dev` – JSON output for specific team, dev branch only
+  * `python3 main.py org=my-org team=my-team format=json branch=dev` – JSON output for specific team, dev branch only
   * `python3 main.py format=json` – uses `ORG_NAME` from `.env`, outputs JSON
   * `python3 main.py org=my-org format=text week=2026.08` – text output for sprint ending in week 8 of 2026
   * `python3 main.py org=my-org team=my-team format=json week=2025.52` – JSON output for specific team and sprint
