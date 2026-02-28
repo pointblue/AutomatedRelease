@@ -235,7 +235,7 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
                 merge_commit_sha = pull.get("merge_commit_sha")
                 tags = commit_to_tags.get(merge_commit_sha, []) if merge_commit_sha else []
 
-                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags))
+                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags, merge_commit_sha))
 
             should_continue = True
 
@@ -325,8 +325,9 @@ async def print_commits():
                             "link": pr_link,
                             "gitlab_issue": gitlab_issue,
                             "tags": tags,
+                            "commit_id": commit_id,
                         }
-                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags in prs
+                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs
                     ],
                 })
             payload = {
@@ -343,7 +344,7 @@ async def print_commits():
                 repo_name = repo.get('full_name')
                 header = f"=== Repository: {repo_name} ==="
                 print(header)
-                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags in prs:
+                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     print(f'Date: {formatted_date}')
                     print(f'Title: {pr_title}')
@@ -352,6 +353,8 @@ async def print_commits():
                     print(f'Author: {author}')
                     print(f'Description: {pr_message}')
                     print(f'Link: {pr_link}')
+                    if commit_id:
+                        print(f'Commit ID: {commit_id}')
                     if tags:
                         print(f'Tags: {", ".join(tags)}')
                     print('-' * len(header))
