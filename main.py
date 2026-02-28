@@ -90,23 +90,22 @@ def parse_github_datetime(value):
     return datetime.fromisoformat(value).astimezone(timezone.utc)
 
 def parse_args():
-    if len(sys.argv) < 2:
-        print("Missing organization name argument. Please provide an organization name: python3 main.py <org name> [team name] [format] [branch_filter] [week]")
-        sys.exit()
+    env_org_name = os.getenv("ORG_NAME")
+    env_team_name = os.getenv("TEAM_NAME")
 
-    org_name = sys.argv[1]
+    org_name = None
     team_name = None
     output_format = "text"
     branch_filter = "all"
     sprint_week = None
 
-    for arg in sys.argv[2:]:
+    for arg in sys.argv[1:]:
         lower = arg.lower()
         if lower in {"text", "json"} and output_format == "text":
             output_format = lower
         elif lower in {"all", "release", "dev"} and branch_filter == "all":
             branch_filter = lower
-        elif arg.startswith("week="):
+        elif lower.startswith("week="):
             # Parse week argument in format: week=YYYY.WW (e.g., week=2026.08)
             try:
                 week_str = arg.split("=")[1]
@@ -123,11 +122,36 @@ def parse_args():
             except (ValueError, IndexError):
                 print("Invalid week format. Use week=YYYY.WW (e.g., week=2026.08)")
                 sys.exit(1)
-        elif team_name is None:
-            team_name = arg
+        elif lower.startswith(("org=", "org_name=", "org-name=")):
+            try:
+                org_name = arg.split("=", 1)[1]
+                if not org_name:
+                    raise ValueError
+            except ValueError:
+                print("Invalid org argument. Use org=<org name> (or org-name=<org name>).")
+                sys.exit(1)
+        elif lower.startswith(("team=", "team_name=", "team-name=")):
+            try:
+                team_name = arg.split("=", 1)[1]
+                if not team_name:
+                    raise ValueError
+            except ValueError:
+                print("Invalid team argument. Use team=<team name> (or team-name=<team name>).")
+                sys.exit(1)
         else:
-            print("Too many arguments provided. Usage: python3 main.py <org> [team] [format] [branch_filter] [week=YYYY.WW]")
+            print("Unrecognized argument.")
+            print("Usage: python3 main.py [org=<org>] [team=<team>] [text|json] [all|release|dev] [week=YYYY.WW]")
             sys.exit(1)
+
+    if org_name is None:
+        org_name = env_org_name
+    if team_name is None:
+        team_name = env_team_name
+
+    if not org_name:
+        print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
+        print("Usage: python3 main.py [org=<org>] [team=<team>] [text|json] [all|release|dev] [week=YYYY.WW]")
+        sys.exit(1)
 
     if output_format not in {"text", "json"}:
         print("Output format must be either 'text' or 'json'")
