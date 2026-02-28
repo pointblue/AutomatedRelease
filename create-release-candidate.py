@@ -21,10 +21,13 @@ def parse_args():
     return json_file
 
 
-async def get_existing_rc_version(client, owner, repo_name, version_prefix):
+async def get_existing_rc_info(client, owner, repo_name, version_prefix):
     """
-    Find the highest RC version for this sprint by checking existing PRs.
-    Returns the next RC number to use.
+    Check for existing RC PRs for this sprint.
+    Returns a tuple: (has_open_rc, open_rc_info, next_rc_number)
+    - has_open_rc: True if there's an open RC PR
+    - open_rc_info: Dict with PR details if open RC exists, None otherwise
+    - next_rc_number: The next RC number to use if creating a new PR
     """
     try:
         url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls"
@@ -34,6 +37,7 @@ async def get_existing_rc_version(client, owner, repo_name, version_prefix):
         }
 
         max_rc = -1
+        open_rc_pr = None
         pattern = re.compile(rf"^{re.escape(version_prefix)}-rc(\d+)$")
 
         async for page in fetch_json_pages(client, url, params=params):
@@ -44,10 +48,22 @@ async def get_existing_rc_version(client, owner, repo_name, version_prefix):
                     rc_num = int(match.group(1))
                     max_rc = max(max_rc, rc_num)
 
-        return max_rc + 1
+                    # Check if this PR is open
+                    if pr.get("state") == "open" and open_rc_pr is None:
+                        open_rc_pr = {
+                            "number": pr.get("number"),
+                            "title": title,
+                            "url": pr.get("html_url"),
+                            "rc_number": rc_num
+                        }
+
+        has_open_rc = open_rc_pr is not None
+        next_rc = max_rc + 1
+
+        return has_open_rc, open_rc_pr, next_rc
     except Exception as e:
         print(f"Warning: Error checking existing RCs for {owner}/{repo_name}: {e}", file=sys.stderr)
-        return 0
+        return False, None, 0
 
 
 async def create_release_pr(client, owner, repo_name, release_branch, version_title, dry_run=False):
@@ -127,19 +143,27 @@ async def process_repository(client, repo_name, release_branch, version_prefix, 
 
             if not release_branch:
                 print(f"[WARNING] {repo_name}: No release branch found", file=sys.stderr)
-                return repo_name, False
+                return repo_name, False, None
 
-            # Determine the next RC version
-            rc_version = await get_existing_rc_version(client, owner, repo, version_prefix)
-            version_title = f"{version_prefix}-rc{rc_version}"
+            # Check for existing RC PRs
+            has_open_rc, open_rc_info, next_rc = await get_existing_rc_info(client, owner, repo, version_prefix)
 
+            if has_open_rc:
+                # There's already an open RC PR - skip creating a new one
+                print(f"[SKIP] {repo_name}: Open RC PR already exists")
+                print(f"       PR #{open_rc_info['number']}: {open_rc_info['title']}")
+                print(f"       URL: {open_rc_info['url']}")
+                print(f"       Merge this PR before creating a new release candidate")
+                return repo_name, False, open_rc_info
+
+            version_title = f"{version_prefix}-rc{next_rc}"
             print(f"[PROCESSING] {repo_name}: Creating {version_title} (dev -> {release_branch})")
             success = await create_release_pr(client, owner, repo, release_branch, version_title, dry_run)
 
-            return repo_name, success
+            return repo_name, success, None
         except Exception as exc:
             print(f"[ERROR] Error processing {repo_name}: {exc}", file=sys.stderr)
-            return repo_name, False
+            return repo_name, False, None
 
 
 async def main():
@@ -200,18 +224,33 @@ async def main():
 
         # Collect results
         results = []
+        skipped_open_prs = []
         for task in asyncio.as_completed(tasks):
-            repo_name, success = await task
+            repo_name, success, open_rc_info = await task
             results.append((repo_name, success))
+            if open_rc_info:
+                skipped_open_prs.append((repo_name, open_rc_info))
 
         # Print summary
         print("\n" + "="*60)
         print("SUMMARY")
         print("="*60)
         successful = sum(1 for _, success in results if success)
+        skipped = len(skipped_open_prs)
+        failed = len(results) - successful - skipped
         total = len(results)
         print(f"Successful: {successful}/{total}")
-        print(f"Failed: {total - successful}/{total}")
+        print(f"Skipped (open RC exists): {skipped}/{total}")
+        print(f"Failed: {failed}/{total}")
+
+        if skipped_open_prs:
+            print("\n" + "="*60)
+            print("SKIPPED - OPEN RC PRs REQUIRING MERGE")
+            print("="*60)
+            for repo_name, open_rc_info in skipped_open_prs:
+                print(f"{repo_name}")
+                print(f"  PR #{open_rc_info['number']}: {open_rc_info['title']}")
+                print(f"  {open_rc_info['url']}")
 
         if dry_run:
             print("\n[DRY RUN] This was a dry run. Use without --dry-run to actually create PRs.")
