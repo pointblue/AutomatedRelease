@@ -226,6 +226,8 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
                 body = pull.get("body") or ""
                 full_description = body.split('\n') if body else None
                 message = get_first_paragraph(full_description, "") if full_description else ""
+                # Remove newline characters from the description
+                message = message.replace('\n', ' ').replace('\r', ' ').strip()
                 author = pull.get("user", {}).get("login", "unknown")
                 title = pull.get("title", "Untitled PR")
                 issue_match = re.search(r"(PBT-\d+)", title)
