@@ -6,7 +6,7 @@ import sys
 import re
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch
+from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, get_deployable_topic
 
 
 def _last_even_iso_week(year):
@@ -413,6 +413,7 @@ async def main():
     load_dotenv()
     org_name, team_name, target_week = parse_args()
     github_token = get_gh_token()
+    deployable_topic = get_deployable_topic()
 
     year, week_num = target_week
     version_prefix = f"v{year}.{week_num:02d}"
@@ -432,7 +433,7 @@ async def main():
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         # Get repositories
         repos = await get_repositories(client, org_name, team_name)
-        deployable_repos = [repo for repo in repos if "deployer-php" in (repo.get("topics") or [])]
+        deployable_repos = [repo for repo in repos if deployable_topic in (repo.get("topics") or [])]
 
         # Process repositories concurrently
         semaphore = asyncio.Semaphore(8)

@@ -8,7 +8,7 @@ This repo provides scripts to help manage releases for Agile sprint periods:
 
 3. **`create-release-notes.py`** - Generates markdown release notes for a sprint version by analyzing merged RC PRs and merge commits on release branches.
 
-Only repositories tagged with the `deployer-php` topic are considered deployable. If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
+Only repositories tagged with the topic from `DEPLOYABLE_TOPIC` in `.env` are considered deployable (defaults to `deployer-php`). If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
 
 ## Authentication Instructions
 	
@@ -46,6 +46,7 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
 **Optional `.env` keys for `main.py`:**
   - `ORG_NAME=<your-org>`
   - `TEAM_NAME=<your-team>`
+  - `DEPLOYABLE_TOPIC=<repo-topic>` (defaults to `deployer-php`)
 
 **Examples:**
   * `python3 main.py org=my-org` – JSON output, all branches, current sprint
@@ -95,7 +96,7 @@ This script takes the JSON output from `main.py` and creates release candidate P
 
 ### create-release-notes.py - Generate Release Notes
 
-This script generates markdown release notes for a sprint version (`vYYYY.WW`) across deployable repositories (`deployer-php` topic). It finds the latest merged RC PR for the target version, compares commits since the previous RC, and summarizes merged PRs.
+This script generates markdown release notes for a sprint version (`vYYYY.WW`) across deployable repositories (topic from `DEPLOYABLE_TOPIC`, default `deployer-php`). It finds the latest merged RC PR for the target version, compares commits since the previous RC, and summarizes merged PRs.
 
 **Usage:** `python3 create-release-notes.py <org_name> [team_name] [week=YYYY.WW]`
 
@@ -134,7 +135,7 @@ This script generates markdown release notes for a sprint version (`vYYYY.WW`) a
     - `https://pblgssgitlab01.aws.pointblue.org/point-blue-engineering-team/point-blue-tech/-/issues/XXXX`
 
 **How it works:**
-  - Reads organization/team repositories and keeps deployable repos only (`deployer-php` topic)
+  - Reads organization/team repositories and keeps deployable repos only (topic from `DEPLOYABLE_TOPIC`, default `deployer-php`)
   - Detects the release branch (`main` or `master`)
   - Looks for merged RC PRs matching the sprint version (for example `v2026.08-rc1`)
   - Compares commits from the previous RC merge commit to the current RC merge commit range

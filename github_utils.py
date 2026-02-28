@@ -80,3 +80,11 @@ async def check_commit_in_branch(client, owner, repo_name, commit_sha, branch):
         return status in ["identical", "behind"]
     except Exception:
         return False
+
+
+def get_deployable_topic():
+    """
+    Get the repository topic used to identify deployable repositories.
+    Defaults to 'deployer-php' when not configured.
+    """
+    return os.getenv("DEPLOYABLE_TOPIC", "deployer-php").strip().lower()

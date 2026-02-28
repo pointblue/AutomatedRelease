@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import httpx
 import os
 import sys
-from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch
+from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch, get_deployable_topic
 
 def _last_even_iso_week(year):
     last_week = datetime(year, 12, 28).isocalendar()[1]
@@ -286,6 +286,7 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
 async def print_commits():
     load_dotenv()
     org_name, team_name, output_format, branch_filter, sprint_week = parse_args()
+    deployable_topic = get_deployable_topic()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
@@ -302,6 +303,7 @@ async def print_commits():
         print(f"Current Week Number: {iso_week}")
         print(f"Output format: {output_format}")
         print(f"Branch filter: {branch_filter}")
+        print(f"Deployable topic: {deployable_topic}")
 
     if branch_filter == "all":
         allowed_branches = {"dev", "main", "master"}
@@ -318,7 +320,7 @@ async def print_commits():
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         repos = await get_repositories(client, org_name, team_name)
-        deployable_repos = [repo for repo in repos if "deployer-php" in (repo.get("topics") or [])]
+        deployable_repos = [repo for repo in repos if deployable_topic in (repo.get("topics") or [])]
         repos = deployable_repos
         if output_format == "text":
             print(f"Discovered {len(repos)} repositories to scan\n")
