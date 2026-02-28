@@ -16,7 +16,7 @@ def _last_even_iso_week(year):
     return last_week
 
 
-def get_sprintdates(now=None, target_week=None):
+def get_sprintdates(now=None, target_week=None, range_tz=timezone.utc):
     """
     Calculate the current or most recent 2-week sprint dates based on even ISO week numbers.
 
@@ -36,7 +36,7 @@ def get_sprintdates(now=None, target_week=None):
             - sprint_end_week: ISO week number of the sprint end (always even)
             - iso_week: Current ISO week number
     """
-    today = now or datetime.now(timezone.utc)
+    today = now or datetime.now(range_tz)
     iso_year, iso_week, _ = today.isocalendar()
 
     # If a specific target week is provided, use it directly
@@ -63,8 +63,8 @@ def get_sprintdates(now=None, target_week=None):
     # Sprint ends on Sunday of the even week (day 7)
     # Sprint starts on Monday of the previous (odd) week
     even_week_monday = datetime.fromisocalendar(sprint_end_year, sprint_end_week, 1)
-    sprint_start = (even_week_monday - timedelta(weeks=1)).replace(tzinfo=timezone.utc)
-    sprint_end = (even_week_monday + timedelta(days=6)).replace(tzinfo=timezone.utc)
+    sprint_start = (even_week_monday - timedelta(weeks=1)).replace(tzinfo=range_tz).astimezone(timezone.utc)
+    sprint_end = (even_week_monday + timedelta(days=6)).replace(tzinfo=range_tz).astimezone(timezone.utc)
 
     return sprint_start, sprint_end, sprint_end_year, sprint_end_week, iso_week
 
@@ -89,6 +89,61 @@ def parse_github_datetime(value):
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"
     return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def parse_timezone_offset(value):
+    """
+    Parse timezone offset for date-range calculations.
+    Supported formats:
+    - 0
+    - -8
+    - 5.5
+    - +05:30
+    - -07:00
+    Returns a timezone object.
+    """
+    raw = (value or "0").strip()
+    if raw in {"0", "+0", "-0", "+00:00", "-00:00"}:
+        return timezone.utc
+
+    hhmm_match = re.fullmatch(r"([+-])(\d{2}):(\d{2})", raw)
+    if hhmm_match:
+        sign = -1 if hhmm_match.group(1) == "-" else 1
+        hours = int(hhmm_match.group(2))
+        minutes = int(hhmm_match.group(3))
+        if hours > 14 or minutes > 59:
+            raise ValueError
+        total_minutes = sign * (hours * 60 + minutes)
+        if total_minutes < -12 * 60 or total_minutes > 14 * 60:
+            raise ValueError
+        return timezone(timedelta(minutes=total_minutes))
+
+    decimal_match = re.fullmatch(r"[+-]?\d+(?:\.\d+)?", raw)
+    if decimal_match:
+        hours_float = float(raw)
+        if hours_float < -12 or hours_float > 14:
+            raise ValueError
+        total_minutes = int(round(hours_float * 60))
+        return timezone(timedelta(minutes=total_minutes))
+
+    raise ValueError
+
+
+def format_timestamp(dt, display_tz):
+    local = dt.astimezone(display_tz)
+    offset = local.strftime("%z")
+    offset = f"{offset[:3]}:{offset[3:]}"
+    return f"{local.strftime('%Y-%m-%d %H:%M:%S')} UTC{offset}"
+
+
+def get_date_range_timezone():
+    tz_raw = os.getenv("DATE_RANGE_TZ_OFFSET", "0")
+    try:
+        tzinfo = parse_timezone_offset(tz_raw)
+    except ValueError:
+        print("Invalid DATE_RANGE_TZ_OFFSET in .env. Use values like 0, -8, 5.5, +05:30, or -07:00.")
+        sys.exit(1)
+    return tzinfo, tz_raw.strip()
 
 
 def parse_week_value(week_value):
@@ -134,6 +189,32 @@ def parse_week_value(week_value):
 
     return {"mode": "range", "start": (start_year, start_week), "end": (end_year, end_week)}
 
+
+def parse_time_offset(offset_value):
+    """
+    Parse a time offset string such as:
+    - 1d (1 day)
+    - 1w (1 week)
+    - 12h (12 hours)
+    - 1.5h (1.5 hours)
+    """
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([hdwHDW])", offset_value.strip())
+    if not match:
+        raise ValueError
+
+    value = float(match.group(1))
+    unit = match.group(2).lower()
+    if value < 0:
+        raise ValueError
+
+    if unit == "h":
+        return timedelta(hours=value)
+    if unit == "d":
+        return timedelta(days=value)
+    if unit == "w":
+        return timedelta(weeks=value)
+    raise ValueError
+
 def parse_args():
     env_org_name = os.getenv("ORG_NAME")
     env_team_name = os.getenv("TEAM_NAME")
@@ -144,6 +225,8 @@ def parse_args():
     branch_filter = "all"
     week_filter = None
     repo_name_filter = None
+    week_offset = timedelta(0)
+    week_offset_raw = None
 
     for arg in sys.argv[1:]:
         lower = arg.lower()
@@ -179,6 +262,13 @@ def parse_args():
                 else:
                     print("Invalid week format. Use week=YYYY.WW, week=YYYY.WW-WW, or week=YYYY.WW-YYYY.WW")
                 sys.exit(1)
+        elif lower.startswith(("week-offset=", "week_offset=", "offset=")):
+            try:
+                week_offset_raw = arg.split("=", 1)[1]
+                week_offset = parse_time_offset(week_offset_raw)
+            except ValueError:
+                print("Invalid week offset. Use values like offset=1d, offset=1w, offset=12h, or offset=1.5h")
+                sys.exit(1)
         elif lower.startswith(("org=", "org_name=", "org-name=")):
             try:
                 org_name = arg.split("=", 1)[1]
@@ -205,7 +295,7 @@ def parse_args():
                 sys.exit(1)
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]")
+            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
             sys.exit(1)
 
     if org_name is None:
@@ -215,7 +305,7 @@ def parse_args():
 
     if not org_name:
         print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
-        print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]")
+        print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
         sys.exit(1)
 
     if output_format not in {"text", "json"}:
@@ -230,7 +320,7 @@ def parse_args():
         print("When using name=<repo>, you must also provide week=YYYY.WW, week=YYYY.WW-WW, or week=YYYY.WW-YYYY.WW.")
         sys.exit(1)
 
-    return org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter
+    return org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw
 
 
 def _select_repositories_by_name(repos, repo_name_filter):
@@ -378,31 +468,39 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
 
 async def print_commits():
     load_dotenv()
-    org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter = parse_args()
+    org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw = parse_args()
     deployable_topic = get_deployable_topic()
+    date_range_tz, date_range_tz_raw = get_date_range_timezone()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
 
-    iso_year, iso_week, _ = datetime.now(timezone.utc).isocalendar()
+    iso_year, iso_week, _ = datetime.now(date_range_tz).isocalendar()
     if week_filter and week_filter["mode"] == "range":
         start_year, start_week = week_filter["start"]
         end_year, end_week = week_filter["end"]
-        sprint_start_date = datetime.fromisocalendar(start_year, start_week, 1).replace(tzinfo=timezone.utc)
-        sprint_end_date = datetime.fromisocalendar(end_year, end_week, 7).replace(tzinfo=timezone.utc)
+        sprint_start_date = datetime.fromisocalendar(start_year, start_week, 1).replace(tzinfo=date_range_tz).astimezone(timezone.utc)
+        sprint_end_date = datetime.fromisocalendar(end_year, end_week, 7).replace(tzinfo=date_range_tz).astimezone(timezone.utc)
         if start_year == end_year:
             version_label = f"v{start_year}.{start_week:02d}-{end_week:02d}"
         else:
             version_label = f"v{start_year}.{start_week:02d}-{end_year}.{end_week:02d}"
-        sprint_label = (
-            f'Weeks {version_label} '
-            f'({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})'
-        )
+        label_prefix = f"Weeks {version_label}"
     else:
         target_week = week_filter["start"] if week_filter and week_filter["mode"] == "single" else None
-        sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week, iso_week = get_sprintdates(target_week=target_week)
+        sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week, iso_week = get_sprintdates(
+            target_week=target_week,
+            range_tz=date_range_tz,
+        )
         version_label = f"v{sprint_end_year}.{sprint_end_week:02d}"
-        sprint_label = f'Sprint {version_label} ({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})'
+        label_prefix = f"Sprint {version_label}"
+
+    # Shift the date window by offset: start is delayed, end is extended by the same offset.
+    if week_offset != timedelta(0):
+        sprint_start_date = sprint_start_date + week_offset
+        sprint_end_date = sprint_end_date + week_offset
+
+    sprint_label = f"{label_prefix} ({format_timestamp(sprint_start_date, date_range_tz)} to {format_timestamp(sprint_end_date, date_range_tz)})"
     if output_format == "text":
         if team_name:
             print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
@@ -413,8 +511,11 @@ async def print_commits():
         print(f"Output format: {output_format}")
         print(f"Branch filter: {branch_filter}")
         print(f"Deployable topic: {deployable_topic}")
+        print(f"Date range timezone offset: {date_range_tz_raw}")
         if week_filter and week_filter["mode"] == "range":
             print(f"Week filter: {version_label}")
+        if week_offset_raw:
+            print(f"Week offset: {week_offset_raw}")
         if repo_name_filter:
             print(f"Repository name filter: {repo_name_filter}")
 
@@ -494,6 +595,8 @@ async def print_commits():
                 "sprint_label": sprint_label,
                 "branch_filter": branch_filter,
                 "week_filter_mode": week_filter["mode"] if week_filter else "default",
+                "week_offset": week_offset_raw,
+                "date_range_tz_offset": date_range_tz_raw,
                 "repo_name_filter": repo_name_filter,
                 "resolved_repo_name": matched_repo_name,
                 "date_filter": "sprint",

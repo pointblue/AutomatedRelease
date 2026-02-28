@@ -34,7 +34,7 @@ steps below to generate one:
 
 This script retrieves merged PRs from the last 2-week sprint and outputs details including commit IDs, tags, and whether commits are in the release branch.
 
-**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]`
+**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]`
 
 **Arguments:**
   - `[org=<org name>]` (optional) - GitHub organization name. If omitted, `ORG_NAME` from `.env` is used.
@@ -42,13 +42,15 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
   - `[name=<repo name>]` (optional) - Filter output to one repository. Supports repository name (for example `my-service`) or full name (for example `my-org/my-service`). If no exact match is found, the closest repository name is used.
   - `[format=text|json]` (optional) - Output format. Defaults to `json`.
   - `[branch=all|release|dev]` (optional) - Branch filter. Defaults to `all` (dev/main/master).
-  - `[week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]` (optional) - Week filter. Single week uses sprint behavior and must be even (end week). Range values include all dates from Monday of the start week through Sunday of the end week.
+  - `[week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]` (optional) - Week filter. Single week uses sprint behavior and must be even (end week). Range values include all dates from Monday of the start week through Sunday of the end week, interpreted in `DATE_RANGE_TZ_OFFSET`.
+  - `[week-offset=<Nh|Nd|Nw>]` or `[offset=<Nh|Nd|Nw>]` (optional) - Shifts the date filter window by the offset. Examples: `1d`, `1w`, `12h`, `1.5h`.
   - `week=...` is required when `name=<repo name>` is provided.
 
 **Optional `.env` keys for `main.py`:**
   - `ORG_NAME=<your-org>`
   - `TEAM_NAME=<your-team>`
   - `DEPLOYABLE_TOPIC=<repo-topic>` (defaults to `deployer-php`)
+  - `DATE_RANGE_TZ_OFFSET=<timezone-offset>` (defaults to `0`; examples: `-8`, `5.5`, `+05:30`)
 
 **Examples:**
   * `python3 main.py org=my-org` – JSON output, all branches, current sprint
@@ -60,6 +62,7 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
   * `python3 main.py org=my-org name=my-service format=text week=2026.08` – text output for one repo in the specified sprint window
   * `python3 main.py org=my-org name=my-service format=text week=2026.07-11` – one repo for ISO week range within 2026
   * `python3 main.py org=my-org name=my-service format=text week=2025.50-2026.05` – one repo for ISO week range across years
+  * `python3 main.py org=my-org name=my-service format=text week=2026.07-11 offset=12h` – same range shifted by 12 hours
 
 **Note:** Depending on how Python is installed, you may need to use `python` instead of `python3`
 
