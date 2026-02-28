@@ -27,7 +27,7 @@ def _last_even_iso_week(year):
     return last_week
 
 
-def get_sprintdates(now=None):
+def get_sprintdates(now=None, target_week=None):
     """
     Calculate the current or most recent 2-week sprint dates based on even ISO week numbers.
 
@@ -37,6 +37,7 @@ def get_sprintdates(now=None):
 
     Args:
         now: Optional datetime to use instead of current time (useful for testing)
+        target_week: Optional tuple of (year, week_number) to calculate a specific sprint
 
     Returns:
         tuple: (sprint_start, sprint_end, sprint_end_year, sprint_end_week, iso_week)
@@ -49,21 +50,25 @@ def get_sprintdates(now=None):
     today = now or datetime.now(timezone.utc)
     iso_year, iso_week, _ = today.isocalendar()
 
-    # Determine the most recent even week (sprint end week)
-    # If we're in an even week, that's the sprint end
-    # If we're in an odd week, use the previous week as sprint end
-    if iso_week % 2 == 0:
-        sprint_end_week = iso_week
-        sprint_end_year = iso_year
+    # If a specific target week is provided, use it directly
+    if target_week:
+        sprint_end_year, sprint_end_week = target_week
     else:
-        sprint_end_week = iso_week - 1
-        sprint_end_year = iso_year
+        # Determine the most recent even week (sprint end week)
+        # If we're in an even week, that's the sprint end
+        # If we're in an odd week, use the previous week as sprint end
+        if iso_week % 2 == 0:
+            sprint_end_week = iso_week
+            sprint_end_year = iso_year
+        else:
+            sprint_end_week = iso_week - 1
+            sprint_end_year = iso_year
 
-    # Handle edge case: if sprint_end_week becomes 0 or negative,
-    # we need to wrap to the previous year's last even week
-    if sprint_end_week < 1:
-        sprint_end_year -= 1
-        sprint_end_week = _last_even_iso_week(sprint_end_year)
+        # Handle edge case: if sprint_end_week becomes 0 or negative,
+        # we need to wrap to the previous year's last even week
+        if sprint_end_week < 1:
+            sprint_end_year -= 1
+            sprint_end_week = _last_even_iso_week(sprint_end_year)
 
     # Calculate actual dates from ISO week numbers
     # Sprint ends on Sunday of the even week (day 7)
@@ -98,13 +103,14 @@ def parse_github_datetime(value):
 
 def parse_args():
     if len(sys.argv) < 2:
-        print("Missing organization name argument. Please provide an organization name: python3 main.py <org name> [team name] [format]")
+        print("Missing organization name argument. Please provide an organization name: python3 main.py <org name> [team name] [format] [branch_filter] [week]")
         sys.exit()
 
     org_name = sys.argv[1]
     team_name = None
     output_format = "text"
     branch_filter = "all"
+    sprint_week = None
 
     for arg in sys.argv[2:]:
         lower = arg.lower()
@@ -112,10 +118,27 @@ def parse_args():
             output_format = lower
         elif lower in {"all", "release", "dev"} and branch_filter == "all":
             branch_filter = lower
+        elif arg.startswith("week="):
+            # Parse week argument in format: week=YYYY.WW (e.g., week=2026.08)
+            try:
+                week_str = arg.split("=")[1]
+                year_str, week_num_str = week_str.split(".")
+                year = int(year_str)
+                week_num = int(week_num_str)
+                if week_num < 1 or week_num > 53:
+                    print("Week number must be between 1 and 53")
+                    sys.exit(1)
+                if week_num % 2 != 0:
+                    print("Week number must be even (sprint end week)")
+                    sys.exit(1)
+                sprint_week = (year, week_num)
+            except (ValueError, IndexError):
+                print("Invalid week format. Use week=YYYY.WW (e.g., week=2026.08)")
+                sys.exit(1)
         elif team_name is None:
             team_name = arg
         else:
-            print("Too many arguments provided. Usage: python3 main.py <org> [team] [format] [branch_filter]")
+            print("Too many arguments provided. Usage: python3 main.py <org> [team] [format] [branch_filter] [week=YYYY.WW]")
             sys.exit(1)
 
     if output_format not in {"text", "json"}:
@@ -126,7 +149,7 @@ def parse_args():
         print("Branch filter must be 'all' (dev/main/master), 'release' (main/master), or 'dev' (dev only)")
         sys.exit(1)
 
-    return org_name, team_name, output_format, branch_filter
+    return org_name, team_name, output_format, branch_filter, sprint_week
 
 async def fetch_json_pages(client, url, params=None):
     while url:
@@ -237,12 +260,12 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
 
 async def print_commits():
     load_dotenv()
-    org_name, team_name, output_format, branch_filter = parse_args()
+    org_name, team_name, output_format, branch_filter, sprint_week = parse_args()
 
     ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
 
-    sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week, iso_week = get_sprintdates()
+    sprint_start_date, sprint_end_date, sprint_end_year, sprint_end_week, iso_week = get_sprintdates(target_week=sprint_week)
     version_label = f"v{sprint_end_year}.{sprint_end_week:02d}"
     sprint_label = f'Sprint {version_label} ({sprint_start_date.strftime("%a %Y-%m-%d")} to {sprint_end_date.strftime("%a %Y-%m-%d")})'
     if output_format == "text":

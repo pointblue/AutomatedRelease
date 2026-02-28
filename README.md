@@ -22,16 +22,19 @@ steps below to generate one:
   * Install dependencies (listed below)
     * `pip install httpx`
     * `pip install python-dotenv`
-  * This script requires an organization name, and accepts optional arguments for team, output format (`text` or `json`), and branch filter (`all` to include dev/main/master, `dev` for dev only, or `release` for main/master only).
-  * Run the `main.py` file: `python3 main.py <org name> [team name] [format] [branch filter]`
+  * This script requires an organization name, and accepts optional arguments for team, output format (`text` or `json`), branch filter (`all` to include dev/main/master, `dev` for dev only, or `release` for main/master only), and a specific sprint week.
+  * Run the `main.py` file: `python3 main.py <org name> [team name] [format] [branch filter] [week=YYYY.WW]`
     * Note about Python aliases: depending on how Python is installed, you may need to run the above via `python` rather
 than `python3`
     * Examples:
-      * `python3 main.py my-org text all` – text output, include dev/main/master.
-      * `python3 main.py my-org json release` – JSON output, only main/master merges.
-      * `python3 main.py my-org json dev` – JSON output, dev merges only.
-      * `python3 main.py my-org my-team release` – default text output for a specific team, release branches only.
-  * If a `.env` file does not already exist, you will be prompted to enter your GitHub token and a `.env` file will be 
+      * `python3 main.py my-org text all` – text output, include dev/main/master branches, current sprint.
+      * `python3 main.py my-org json release` – JSON output, only main/master merges, current sprint.
+      * `python3 main.py my-org json dev` – JSON output, dev merges only, current sprint.
+      * `python3 main.py my-org my-team release` – default text output for a specific team, release branches only, current sprint.
+      * `python3 main.py my-org week=2026.08` – text output, all branches, for sprint ending in week 8 of 2026.
+      * `python3 main.py my-org my-team json week=2025.52` – JSON output for specific team and sprint ending in week 52 of 2025.
+    * Week format: Use `week=YYYY.WW` where WW must be an even week number (sprint end week).
+  * If a `.env` file does not already exist, you will be prompted to enter your GitHub token and a `.env` file will be
 created automatically
 
 
