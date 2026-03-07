@@ -34,13 +34,13 @@ steps below to generate one:
 
 This script retrieves merged PRs from the last 2-week sprint and outputs details including commit IDs and tags.
 
-**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]`
+**Usage:** `python3 main.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]`
 
 **Arguments:**
   - `[org=<org name>]` (optional) - GitHub organization name. If omitted, `ORG_NAME` from `.env` is used.
   - `[team=<team name>]` (optional) - Filter by specific team. If omitted, `TEAM_NAME` from `.env` is used when present.
   - `[name=<repo name>]` (optional) - Filter output to one repository. Supports repository name (for example `my-service`) or full name (for example `my-org/my-service`). If no exact match is found, the closest repository name is used.
-  - `[format=text|json]` (optional) - Output format. Defaults to `json`.
+  - `[format=text|json|markdown]` (optional) - Output format. Defaults to `json`. `markdown` produces the same layout as `text` without terminal colors, suitable for saving to a `.md` file.
   - `[branch=all|release|dev]` (optional) - Branch filter. Defaults to `dev`.
   - `[week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW]` (optional) - Week filter. Single week uses sprint behavior and must be even (end week). Range values include all dates from Monday of the start week through Sunday of the end week, interpreted in `DATE_RANGE_TZ_OFFSET`.
   - `[week-offset=<Nh|Nd|Nw>]` or `[offset=<Nh|Nd|Nw>]` (optional) - Shifts the date filter window by the offset. Examples: `1d`, `1w`, `12h`, `1.5h`.
@@ -63,6 +63,7 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
   * `python3 main.py org=my-org name=my-service format=text week=2026.07-11` – one repo for ISO week range within 2026
   * `python3 main.py org=my-org name=my-service format=text week=2025.50-2026.05` – one repo for ISO week range across years
   * `python3 main.py org=my-org name=my-service format=text week=2026.07-11 offset=12h` – same range shifted by 12 hours
+  * `python3 main.py org=my-org format=markdown > sprint.md` – markdown output saved to a file
 
 **Note:** Depending on how Python is installed, you may need to use `python` instead of `python3`
 

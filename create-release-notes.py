@@ -327,18 +327,21 @@ def extract_first_non_empty_paragraph(text):
 
 
 def link_pbt_issues(text):
-    """Convert PBT-XXXX references into markdown links to GitLab issues."""
+    """Convert PBT-XXXX and GSS-XXXX references into markdown links to GitLab issues."""
     if not text:
         return text
 
-    pattern = re.compile(r"\bPBT-(\d{4})\b")
-    return pattern.sub(
-        lambda m: (
-            f"[PBT-{m.group(1)}]"
-            f"(https://pblgssgitlab01.aws.pointblue.org/point-blue-engineering-team/point-blue-tech/-/issues/{m.group(1)})"
-        ),
-        text,
-    )
+    def _replace(m):
+        prefix = m.group(1)
+        number = m.group(2)
+        project = "pointblue-gss" if prefix == "GSS" else "point-blue-tech"
+        return (
+            f"[{prefix}-{number}]"
+            f"(https://pblgssgitlab01.aws.pointblue.org/point-blue-engineering-team/{project}/-/issues/{number})"
+        )
+
+    pattern = re.compile(r"\b(PBT|GSS)-(\d{4})\b")
+    return pattern.sub(_replace, text)
 
 
 async def process_repository(client, repo, version_prefix, semaphore):
