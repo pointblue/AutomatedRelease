@@ -433,6 +433,7 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
 
         if reached_before_sprint_window:
             break
+    sprint_prs.sort(key=lambda x: x[0])
     return sprint_prs
 
 
@@ -494,22 +495,27 @@ async def print_commits():
 
     sprint_label = f"{label_prefix} ({format_timestamp(sprint_start_date, date_range_tz)} to {format_timestamp(sprint_end_date, date_range_tz)})"
     if output_format == "text":
+        title = f"  {label_prefix}  "
+        border = "=" * max(60, len(title))
+        print(f"\n{border}\n{title.center(len(border))}\n{border}\n")
         if team_name:
             print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
         else:
             print(f"No team specified. Printing PRs for all repos in organization {org_name}\n")
-        print(f"Showing items for: {sprint_label}")
-        print(f"Current Week Number: {iso_week}")
-        print(f"Output format: {output_format}")
-        print(f"Branch filter: {branch_filter}")
-        print(f"Deployable topic: {deployable_topic}")
-        print(f"Date range timezone offset: {date_range_tz_raw}")
+        print(f'{"Sprint version":<26}: {label_prefix}')
+        print(f'{"Sprint begin":<26}: {format_timestamp(sprint_start_date, date_range_tz)}')
+        print(f'{"Sprint end":<26}: {format_timestamp(sprint_end_date, date_range_tz)}')
+        print(f'{"Current Week Number":<26}: {iso_week}')
+        print(f'{"Output format":<26}: {output_format}')
+        print(f'{"Branch filter":<26}: {branch_filter}')
+        print(f'{"Deployable topic":<26}: {deployable_topic}')
+        print(f'{"Date range timezone offset":<26}: {date_range_tz_raw}')
         if week_filter and week_filter["mode"] == "range":
-            print(f"Week filter: {version_label}")
+            print(f'{"Week filter":<26}: {version_label}')
         if week_offset_raw:
-            print(f"Week offset: {week_offset_raw}")
+            print(f'{"Week offset":<26}: {week_offset_raw}')
         if repo_name_filter:
-            print(f"Repository name filter: {repo_name_filter}")
+            print(f'{"Repository name filter":<26}: {repo_name_filter}')
 
     if branch_filter == "all":
         allowed_branches = {"dev", "main", "master"}
@@ -562,19 +568,27 @@ async def print_commits():
             repo_payload = []
             for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
+                def _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id):
+                    entry = {
+                        "date": pr_date.isoformat(),
+                    }
+                    if date_range_tz != timezone.utc:
+                        entry["date_local"] = format_timestamp(pr_date, date_range_tz)
+                    entry.update({
+                        "title": pr_title,
+                        "author": author,
+                        "description": pr_message,
+                        "link": pr_link,
+                        "gitlab_issue": gitlab_issue,
+                        "tags": tags,
+                        "commit_id": commit_id,
+                    })
+                    return entry
+
                 repo_payload.append({
                     "repository": repo_name,
                     "pull_requests": [
-                        {
-                            "date": pr_date.isoformat(),
-                            "title": pr_title,
-                            "author": author,
-                            "description": pr_message,
-                            "link": pr_link,
-                            "gitlab_issue": gitlab_issue,
-                            "tags": tags,
-                            "commit_id": commit_id,
-                        }
+                        _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id)
                         for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs
                     ],
                 })
@@ -594,24 +608,27 @@ async def print_commits():
             }
             print(json.dumps(payload, indent=2))
         else:
+            separator = "=" * 60
+            pr_divider = "-" * 60
             for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
-                header = f"=== Repository: {repo_name} ==="
-                print(header)
+                print(f"\n{separator}\n  {repo_name}\n{separator}\n")
                 for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
-                    print(f'Date: {formatted_date}')
-                    print(f'Title: {pr_title}')
+                    print(f'{"Date":<12}: {formatted_date}')
+                    if date_range_tz != timezone.utc:
+                        print(f'{"Date (local)":<12}: {format_timestamp(pr_date, date_range_tz)}')
+                    print(f'{"Title":<12}: {pr_title}')
                     if gitlab_issue:
-                        print(f'GitLab Issue: {gitlab_issue}')
-                    print(f'Author: {author}')
-                    print(f'Description: {pr_message}')
-                    print(f'Link: {pr_link}')
+                        print(f'{"GitLab Issue":<12}: {gitlab_issue}')
+                    print(f'{"Author":<12}: {author}')
+                    print(f'{"Description":<12}: {pr_message}')
+                    print(f'{"Link":<12}: {pr_link}')
                     if commit_id:
-                        print(f'Commit ID: {commit_id}')
+                        print(f'{"Commit ID":<12}: {commit_id}')
                     if tags:
-                        print(f'Tags: {", ".join(tags)}')
-                    print('-' * len(header))
+                        print(f'{"Tags":<12}: {", ".join(tags)}')
+                    print(pr_divider)
 
     if output_format == "text":
         print('END')
