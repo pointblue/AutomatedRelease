@@ -227,6 +227,7 @@ def parse_args():
     repo_name_filter = None
     week_offset = timedelta(0)
     week_offset_raw = None
+    write_output_file = False
 
     for arg in sys.argv[1:]:
         lower = arg.lower()
@@ -293,9 +294,11 @@ def parse_args():
             except ValueError:
                 print("Invalid name argument. Use name=<repo name> (or repo=<repo name>).")
                 sys.exit(1)
+        elif arg == "--output":
+            write_output_file = True
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
+            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]")
             sys.exit(1)
 
     if org_name is None:
@@ -320,7 +323,7 @@ def parse_args():
         print("When using name=<repo>, you must also provide week=YYYY.WW, week=YYYY.WW-WW, or week=YYYY.WW-YYYY.WW.")
         sys.exit(1)
 
-    return org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw
+    return org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw, write_output_file
 
 
 def _select_repositories_by_name(repos, repo_name_filter):
@@ -461,7 +464,7 @@ async def process_repository(client, repo, sprint_start_date, sprint_end_date, a
 
 async def print_commits():
     load_dotenv()
-    org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw = parse_args()
+    org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw, write_output_file = parse_args()
     deployable_topic = get_deployable_topic()
     date_range_tz, date_range_tz_raw = get_date_range_timezone()
 
@@ -494,6 +497,14 @@ async def print_commits():
         sprint_end_date = sprint_end_date + week_offset
 
     sprint_label = f"{label_prefix} ({format_timestamp(sprint_start_date, date_range_tz)} to {format_timestamp(sprint_end_date, date_range_tz)})"
+
+    ext = {"text": "txt", "json": "json", "markdown": "md"}[output_format]
+    output_file_path = os.path.join("output", f"{version_label}.{ext}")
+    output_file = None
+    if write_output_file:
+        output_file = open(output_file_path, "w")
+        sys.stdout = output_file
+
     RESET  = "\033[0m"
     BOLD   = "\033[1m"
     DIM    = "\033[2m"
@@ -628,17 +639,16 @@ async def print_commits():
                 print(f"{BOLD}{CYAN}{separator}{RESET}\n")
                 for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
-                    print(field("Date", formatted_date, width=12))
                     if date_range_tz != timezone.utc:
                         print(field("Date (local)", format_timestamp(pr_date, date_range_tz), width=12))
+                    else:
+                        print(field("Date", formatted_date, width=12))
                     print(field("Title", pr_title, width=12))
                     if gitlab_issue:
                         print(field("GitLab Issue", gitlab_issue, width=12))
                     print(field("Author", author, width=12))
                     print(field("Description", pr_message, width=12))
                     print(field("Link", pr_link, width=12))
-                    if commit_id:
-                        print(field("Commit ID", commit_id, width=12))
                     if tags:
                         print(field("Tags", ", ".join(tags), width=12))
                     print(pr_divider)
@@ -693,6 +703,11 @@ async def print_commits():
 
     if output_format in {"text", "markdown"}:
         print('END')
+
+    if output_file:
+        sys.stdout = sys.__stdout__
+        output_file.close()
+        print(f"Output written to {output_file_path}")
 
 
 if __name__ == "__main__":

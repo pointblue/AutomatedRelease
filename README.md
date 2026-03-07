@@ -67,6 +67,11 @@ This script retrieves merged PRs from the last 2-week sprint and outputs details
 
 **Note:** Depending on how Python is installed, you may need to use `python` instead of `python3`
 
+**Tip:** When using `format=text`, pipe the output through `less -R` to preserve ANSI colors while scrolling:
+```bash
+python3 main.py org=my-org format=text | less -R
+```
+
 ### create-release-candidate.py - Create Release PRs
 
 This script takes the JSON output from `main.py` and creates release candidate PRs from dev to release branches (main/master) for repositories with unreleased changes. It automatically determines the correct RC version number by checking existing PRs.
