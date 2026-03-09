@@ -24,6 +24,7 @@ def parse_args():
     team_name = None
     repo_name_filter = None
     target_week = None
+    write_output_file = False
 
     for arg in sys.argv[1:]:
         lower = arg.lower()
@@ -67,9 +68,11 @@ def parse_args():
             except (ValueError, IndexError):
                 print("Invalid week format. Use week=YYYY.WW (e.g., week=2026.08)")
                 sys.exit(1)
+        elif arg == "--output":
+            write_output_file = True
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 create-release-notes.py [org=<org>] [team=<team>] [name=<repo>] [week=YYYY.WW]")
+            print("Usage: python3 create-release-notes.py [org=<org>] [team=<team>] [name=<repo>] [week=YYYY.WW] [--output]")
             sys.exit(1)
 
     if org_name is None:
@@ -99,7 +102,7 @@ def parse_args():
                 week_num = _last_even_iso_week(iso_year)
             target_week = (iso_year, week_num)
 
-    return org_name, team_name, repo_name_filter, target_week
+    return org_name, team_name, repo_name_filter, target_week, write_output_file
 
 
 def _select_repositories_by_name(repos, repo_name_filter):
@@ -407,13 +410,12 @@ async def process_repository(client, repo, version_prefix, semaphore):
                     if pr_title:
                         # Create GitHub commit URL
                         commit_url = f"https://github.com/{full_name}/commit/{full_sha}"
-                        message = f"[#{pr_number}]({pr_html_url}): {pr_title}"
-                        if pr_first_paragraph:
-                            message += f" - {pr_first_paragraph}"
-                        message = link_pbt_issues(message)
+                        message = link_pbt_issues(f"[#{pr_number}]({pr_html_url}): **{pr_title}**")
+                        description = link_pbt_issues(pr_first_paragraph) if pr_first_paragraph else None
                         commit_notes.append({
                             "sha": sha,
                             "message": message,
+                            "description": description,
                             "url": commit_url
                         })
                 except Exception:
@@ -442,12 +444,18 @@ async def process_repository(client, repo, version_prefix, semaphore):
 
 async def main():
     load_dotenv()
-    org_name, team_name, repo_name_filter, target_week = parse_args()
+    org_name, team_name, repo_name_filter, target_week, write_output_file = parse_args()
     github_token = get_gh_token()
     deployable_topic = get_deployable_topic()
 
     year, week_num = target_week
     version_prefix = f"v{year}.{week_num:02d}"
+
+    output_file_path = os.path.join("output", f"{version_prefix}-release-notes.md")
+    output_file = None
+    if write_output_file:
+        output_file = open(output_file_path, "w")
+        sys.stdout = output_file
 
     headers = {
         "Authorization": f"Bearer {github_token}",
@@ -481,7 +489,14 @@ async def main():
 
         # Generate markdown output
         print(f"# Release Notes - {version_prefix}\n")
-        print(f"**Organization:** {org_name}\n")
+
+        print("---\n")
+        print("**How these notes are prepared:**")
+        print("For each repository, **This RC** is the most recently merged release candidate PR for this version.")
+        print("**Last RC** is the previous release candidate merged to the release branch (from any version).")
+        print("The changes listed below are the pull requests merged between Last RC and This RC.")
+        print("If there is no Last RC, the changes are taken from the commits included in This RC itself.\n")
+        print("---\n")
         if repo_name_filter:
             print(f"**Repository Filter:** {repo_name_filter}")
             if resolved_repo_name:
@@ -491,19 +506,27 @@ async def main():
         if repo_results:
             for repo_data in repo_results:
                 print(f"## {repo_data['repo']}\n")
-                print(f"**Branch:** {repo_data['release_branch']}")
-                print(f"**Current RC:** {repo_data['current_rc']}")
+                print(f"**This RC:** {repo_data['current_rc']}  ")
                 if repo_data['previous_rc']:
-                    print(f"**Previous RC:** {repo_data['previous_rc']}")
+                    print(f"**Last RC:** {repo_data['previous_rc']}")
                 else:
-                    print(f"**Previous RC:** (no previous RC PR)")
+                    print(f"**Last RC:** (none)")
                 print()
 
                 for commit in repo_data['commits']:
-                    print(f"- `{commit['sha']}` {commit['message']}")
+                    if commit.get('description'):
+                        print(f"- {commit['message']}  ")
+                        print(f"  {commit['description']}")
+                    else:
+                        print(f"- {commit['message']}")
                 print()
         else:
             print(f"*No repositories with merged RC PRs found for {version_prefix}.*\n")
+
+    if output_file:
+        sys.stdout = sys.__stdout__
+        output_file.close()
+        print(f"Output written to {output_file_path}")
 
 
 if __name__ == "__main__":
