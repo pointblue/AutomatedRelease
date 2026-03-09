@@ -72,3 +72,4 @@ All three scripts share `github_utils.py`, which provides:
 | `TEAM_NAME` | (optional) | all |
 | `DEPLOYABLE_TOPIC` | `deployer-php` | all |
 | `DATE_RANGE_TZ_OFFSET` | `0` | `main.py` |
+| `WEEK_OFFSET` | (optional) | `main.py` |

@@ -218,6 +218,7 @@ def parse_time_offset(offset_value):
 def parse_args():
     env_org_name = os.getenv("ORG_NAME")
     env_team_name = os.getenv("TEAM_NAME")
+    env_week_offset_raw = os.getenv("WEEK_OFFSET")
 
     org_name = None
     team_name = None
@@ -305,6 +306,13 @@ def parse_args():
         org_name = env_org_name
     if team_name is None:
         team_name = env_team_name
+    if week_offset_raw is None and env_week_offset_raw:
+        try:
+            week_offset_raw = env_week_offset_raw
+            week_offset = parse_time_offset(week_offset_raw)
+        except ValueError:
+            print("Invalid WEEK_OFFSET in .env. Use values like 1d, 1w, 12h, or 1.5h")
+            sys.exit(1)
 
     if not org_name:
         print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
