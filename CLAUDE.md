@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Install dependencies:
 ```bash
-pip install httpx python-dotenv
+pip install httpx python-dotenv markdown
 ```
 
 Configure environment:
@@ -36,6 +36,9 @@ python3 create-release-candidate.py sprint-prs.json
 
 # Generate release notes
 python3 create-release-notes.py org=my-org week=2026.08
+
+# Publish release notes to Confluence
+python3 create-confluence-page.py output/v2026.08-release-notes.md
 ```
 
 ## Architecture
@@ -52,6 +55,8 @@ All three scripts share `github_utils.py`, which provides:
 **`main.py`** — fetches merged PRs within a sprint window across all deployable repos in an org/team. Uses async concurrency (semaphore of 8). Outputs JSON (piped to `create-release-candidate.py`) or human-readable text. Sprint dates are computed from even ISO week numbers: each sprint starts Monday of an odd week and ends Sunday of the following even week.
 
 **`create-release-candidate.py`** — reads JSON output from `main.py`. For each repo with unreleased commits (checked via `check_commit_in_branch`), creates a `dev → main/master` PR titled `vYYYY.WW-rcN` where N is auto-incremented. Skips repos where all PRs are already released or where an open RC PR already exists.
+
+**`create-confluence-page.py`** — reads a release notes markdown file (output of `create-release-notes.py`) and publishes it as a new Confluence page under the appropriate year page in the `IM` space. Aborts if the page already exists. Creates the year page automatically if it doesn't exist yet.
 
 **`create-release-notes.py`** — queries GitHub for merged RC PRs matching the target version. For each repo, finds the current and previous RC merge commits, then retrieves commits in that range. Filters to only PR-merge commits, fetches PR titles/bodies, and outputs markdown. Converts `PBT-XXXX` references to GitLab issue links.
 
@@ -73,3 +78,5 @@ All three scripts share `github_utils.py`, which provides:
 | `DEPLOYABLE_TOPIC` | `deployer-php` | all |
 | `DATE_RANGE_TZ_OFFSET` | `0` | `main.py` |
 | `WEEK_OFFSET` | (optional) | `main.py` |
+| `CONFLUENCE_EMAIL` | (required) | `create-confluence-page.py` |
+| `CONFLUENCE_API_TOKEN` | (required) | `create-confluence-page.py` |

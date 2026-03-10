@@ -8,6 +8,8 @@ This repo provides scripts to help manage releases for Agile sprint periods:
 
 3. **`create-release-notes.py`** - Generates markdown release notes for a sprint version by analyzing merged RC PRs and merge commits on release branches.
 
+4. **`create-confluence-page.py`** - Publishes a release notes markdown file to Confluence as a new page under the appropriate year page.
+
 Only repositories tagged with the topic from `DEPLOYABLE_TOPIC` in `.env` are considered deployable (defaults to `deployer-php`). If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
 
 ## Authentication Instructions
@@ -166,9 +168,47 @@ This script generates markdown release notes for a release version (`vYYYY.WW`) 
   - Excludes RC commits and formats merged PR data as release notes
 
 
+### create-confluence-page.py - Publish Release Notes to Confluence
+
+This script reads a release notes markdown file (produced by `create-release-notes.py`) and creates a new Confluence page for that sprint release under the appropriate year page.
+
+**Usage:** `python3 create-confluence-page.py <release-notes-file> [--draft]`
+
+**Arguments:**
+  - `<release-notes-file>` (required) - Path to the markdown file, e.g. `output/v2026.10-release-notes.md`
+  - `[--draft]` (optional) - Create the page as an unpublished draft. Skips the duplicate page check. Useful for testing formatting before the real page exists.
+
+**Examples:**
+  * Publish release notes for a sprint:
+    ```bash
+    python3 create-confluence-page.py output/v2026.10-release-notes.md
+    ```
+  * Create an unpublished draft to preview formatting:
+    ```bash
+    python3 create-confluence-page.py output/v2026.10-release-notes.md --draft
+    ```
+  * Full workflow — generate then publish:
+    ```bash
+    python3 create-release-notes.py org=my-org week=2026.10 --output
+    python3 create-confluence-page.py output/v2026.10-release-notes.md
+    ```
+
+**How it works:**
+  - Parses the version (e.g. `v2026.10`) and year from the filename
+  - Page title is set to `v2026.10 Release`
+  - Aborts with an error if a page with that title already exists in Confluence
+  - If the year page (e.g. `v2026 Releases`) doesn't exist yet, it is created automatically under the main releases page
+  - Converts the markdown to Confluence storage format and creates the sprint page under the year page
+
+**Required `.env` keys:**
+  - `CONFLUENCE_EMAIL` — your Atlassian account email
+  - `CONFLUENCE_API_TOKEN` — generate one by going to your Atlassian account settings → [Security](https://id.atlassian.com/manage-profile/security) → API tokens
+
+
 ## Dependencies
 1.   [httpx](https://pypi.org/project/httpx/)
 2.   [python-dotenv](https://pypi.org/project/python-dotenv/)
+3.   [markdown](https://pypi.org/project/Markdown/) *(required for `create-confluence-page.py`)*
 
 In order to run this program, you will need to have installed the proper dependencies.
 You can do this by opening an IDE and running the command `pip install {example_module}` for each dependency you are missing.
