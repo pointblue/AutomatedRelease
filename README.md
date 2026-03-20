@@ -4,11 +4,13 @@ This repo provides scripts to help manage releases for Agile sprint periods:
 
 1. **`main.py`** - Outputs merged PRs from the last 2-week sprint for every repo within the given organization. Shows PR details including commit IDs and tags.
 
-2. **`create-release-candidate.py`** - Creates release candidate PRs from dev to release branches for repositories with unreleased changes. Automatically determines the correct RC version number.
+2. **`unmerged-prs.py`** - Finds open PRs that were approved within a sprint window but not yet merged. Useful for identifying work that is ready to ship but hasn't been released.
 
-3. **`create-release-notes.py`** - Generates markdown release notes for a sprint version by analyzing merged RC PRs and merge commits on release branches.
+3. **`create-release-candidate.py`** - Creates release candidate PRs from dev to release branches for repositories with unreleased changes. Automatically determines the correct RC version number.
 
-4. **`create-confluence-page.py`** - Publishes a release notes markdown file to Confluence as a new page under the appropriate year page.
+4. **`create-release-notes.py`** - Generates markdown release notes for a sprint version by analyzing merged RC PRs and merge commits on release branches.
+
+5. **`create-confluence-page.py`** - Publishes a release notes markdown file to Confluence as a new page under the appropriate year page.
 
 Only repositories tagged with the topic from `DEPLOYABLE_TOPIC` in `.env` are considered deployable (defaults to `deployer-php`). If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
 
@@ -77,6 +79,30 @@ If that doesn't work, your Python installation may require `python` instead of `
 ```bash
 ./main.py org=my-org format=console | less -R
 ```
+
+### unmerged-prs.py - Find Approved Unmerged PRs
+
+This script finds open PRs that received an approval within the sprint window but have not yet been merged. It takes the same arguments as `main.py`.
+
+**Usage:** `./unmerged-prs.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=console|text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]`
+
+**Arguments:** Same as `main.py` — see above.
+
+**Examples:**
+  * `./unmerged-prs.py org=my-org` – JSON output, dev branch only, current sprint
+  * `./unmerged-prs.py org=my-org format=console week=2026.08` – colored output for a specific sprint
+  * `./unmerged-prs.py org=my-org format=console week=2026.08 --output` – write to `output/v2026.08-unmerged-prs.txt`
+
+**How it works:**
+  - Fetches open PRs sorted by `updated_at` and stops when PRs predate the sprint window
+  - For each candidate PR, concurrently fetches its reviews and its mergeability status
+  - Uses each reviewer's *latest* review within the sprint to determine their final state — so an approve followed by a request for changes counts as not approved
+  - Includes a PR only if at least one reviewer's final sprint review is `APPROVED` and the PR has no merge conflicts
+  - PRs where GitHub hasn't computed mergeability yet (`null`) are included to avoid missing forgotten PRs
+  - Output shows the latest approval timestamp, PR details, and the list of approvers
+  - A summary at the end lists per-repo counts for both unmerged and merged approved PRs; in `console` format the unmerged count is bold yellow (action may be needed) and "no approved unmerged PRs" is bold green (all clear)
+  - Repos with only approved merged PRs (no unmerged) appear in the summary for accuracy confirmation, but not in the main PR details
+  - JSON output includes `repositories_scanned`, `repositories_with_prs`, `total_approved_count`, `total_approved_merged_count` at the top level and `approved_count`/`approved_merged_count` per repository
 
 ### create-release-candidate.py - Create Release PRs
 
