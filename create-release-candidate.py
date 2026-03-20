@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import asyncio
 import json
 import httpx
@@ -5,7 +6,7 @@ import os
 import sys
 import re
 from dotenv import load_dotenv
-from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch
+from src.github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch, make_github_headers
 
 
 def parse_args():
@@ -215,11 +216,7 @@ async def main():
         print("[DRY RUN MODE] No PRs will be created")
     print()
 
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    headers = make_github_headers(github_token)
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         # Process all repositories concurrently

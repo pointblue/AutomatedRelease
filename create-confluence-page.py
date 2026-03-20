@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import httpx
 import markdown as md_lib
 import os

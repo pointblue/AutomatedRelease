@@ -23,8 +23,11 @@ On first run without a `.env`, scripts will prompt for your GitHub token and cre
 # View merged PRs for current sprint (JSON output)
 python3 main.py org=my-org
 
-# View merged PRs for a specific sprint in text format
+# View merged PRs for a specific sprint (colored console output)
 python3 main.py org=my-org format=console week=2026.08
+
+# View merged PRs for a specific sprint (plain text, no colors)
+python3 main.py org=my-org format=text week=2026.08
 
 # View a specific repo's PRs for a given week range
 python3 main.py org=my-org name=my-service format=console week=2026.07-11
@@ -62,7 +65,7 @@ All three scripts share `github_utils.py`, which provides:
 
 ### Maintenance conventions
 
-- When changing CLI arguments, valid values, or behavior in any script, update `README.md` to match — including usage strings, argument descriptions, and examples.
+- After modifying any script, check whether `README.md` needs updating — including usage strings, argument descriptions, examples, and how to run the scripts.
 
 ### Key conventions
 

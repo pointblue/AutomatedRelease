@@ -1,5 +1,5 @@
+#!/usr/bin/env python3
 import asyncio
-import difflib
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import httpx
 import os
 import sys
-from github_utils import get_gh_token, fetch_json_pages, get_deployable_topic
+from src.github_utils import get_gh_token, fetch_json_pages, get_deployable_topic, make_github_headers, get_repositories, select_repositories_by_name
 
 def _last_even_iso_week(year):
     last_week = datetime(year, 12, 28).isocalendar()[1]
@@ -235,10 +235,10 @@ def parse_args():
         if lower.startswith("format="):
             try:
                 output_format = arg.split("=", 1)[1].lower()
-                if output_format not in {"console", "json", "markdown"}:
+                if output_format not in {"console", "text", "json", "markdown"}:
                     raise ValueError
             except ValueError:
-                print("Invalid format argument. Use format=console, format=json, or format=markdown.")
+                print("Invalid format argument. Use format=console, format=text, format=json, or format=markdown.")
                 sys.exit(1)
         elif lower.startswith(("branch=", "branch_filter=", "branch-filter=")):
             try:
@@ -299,7 +299,7 @@ def parse_args():
             write_output_file = True
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=console|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]")
+            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=console|text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]")
             sys.exit(1)
 
     if org_name is None:
@@ -319,8 +319,8 @@ def parse_args():
         print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=console|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
         sys.exit(1)
 
-    if output_format not in {"console", "json", "markdown"}:
-        print("Output format must be 'console', 'json', or 'markdown'")
+    if output_format not in {"console", "text", "json", "markdown"}:
+        print("Output format must be 'console', 'text', 'json', or 'markdown'")
         sys.exit(1)
 
     if branch_filter not in {"all", "release", "dev"}:
@@ -333,46 +333,6 @@ def parse_args():
 
     return org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw, write_output_file
 
-
-def _select_repositories_by_name(repos, repo_name_filter):
-    target = repo_name_filter.strip().lower()
-    target_repo_name = target.split("/", 1)[-1]
-
-    exact_matches = [
-        repo for repo in repos
-        if repo.get("name", "").lower() == target_repo_name
-        or repo.get("full_name", "").lower() == target
-        or repo.get("full_name", "").lower().endswith(f"/{target_repo_name}")
-    ]
-    if exact_matches:
-        return exact_matches, None
-
-    by_name = {repo.get("name", "").lower(): repo for repo in repos if repo.get("name")}
-    by_full_name = {repo.get("full_name", "").lower(): repo for repo in repos if repo.get("full_name")}
-    candidates = list(by_name.keys()) + list(by_full_name.keys())
-    close = difflib.get_close_matches(target, candidates, n=1, cutoff=0.75)
-    if not close:
-        close = difflib.get_close_matches(target_repo_name, list(by_name.keys()), n=1, cutoff=0.75)
-
-    if close:
-        key = close[0]
-        matched_repo = by_name.get(key) or by_full_name.get(key)
-        if matched_repo:
-            return [matched_repo], matched_repo.get("full_name")
-
-    return [], None
-
-
-async def get_repositories(client, org_name, team_name=None):
-    if team_name:
-        base_url = f"https://api.github.com/orgs/{org_name}/teams/{team_name}/repos"
-    else:
-        base_url = f"https://api.github.com/orgs/{org_name}/repos"
-    params = {"per_page": 100, "type": "all", "sort": "full_name"}
-    repos = []
-    async for page in fetch_json_pages(client, base_url, params=params):
-        repos.extend(page)
-    return repos
 
 
 async def fetch_repo_tags(client, owner, repo_name):
@@ -506,23 +466,26 @@ async def print_commits():
 
     sprint_label = f"{label_prefix} ({format_timestamp(sprint_start_date, date_range_tz)} to {format_timestamp(sprint_end_date, date_range_tz)})"
 
-    ext = {"console": "txt", "json": "json", "markdown": "md"}[output_format]
+    ext = {"console": "txt", "text": "txt", "json": "json", "markdown": "md"}[output_format]
     output_file_path = os.path.join("output", f"{version_label}.{ext}")
     output_file = None
     if write_output_file:
         output_file = open(output_file_path, "w")
         sys.stdout = output_file
 
-    RESET  = "\033[0m"
-    BOLD   = "\033[1m"
-    DIM    = "\033[2m"
-    CYAN   = "\033[36m"
-    WHITE  = "\033[97m"
+    if output_format == "console":
+        RESET  = "\033[0m"
+        BOLD   = "\033[1m"
+        DIM    = "\033[2m"
+        CYAN   = "\033[36m"
+        WHITE  = "\033[97m"
+    else:
+        RESET = BOLD = DIM = CYAN = WHITE = ""
 
     def field(name, value, width=26):
         return f"{DIM}{name:<{width}}{RESET}: {value}"
 
-    if output_format == "console":
+    if output_format in {"console", "text"}:
         title = f"  {label_prefix}  "
         border = "=" * max(60, len(title))
         print(f"\n{BOLD}{CYAN}{border}{RESET}")
@@ -554,11 +517,7 @@ async def print_commits():
     else:
         allowed_branches = {"main", "master"}
 
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept": "application/vnd.github+json, application/vnd.github.mercy-preview+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    headers = make_github_headers(github_token, mercy_preview=True)
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         repos = await get_repositories(client, org_name, team_name)
@@ -566,8 +525,8 @@ async def print_commits():
         repos = deployable_repos
         matched_repo_name = None
         if repo_name_filter:
-            repos, matched_repo_name = _select_repositories_by_name(repos, repo_name_filter)
-        if output_format == "console":
+            repos, matched_repo_name = select_repositories_by_name(repos, repo_name_filter)
+        if output_format in {"console", "text"}:
             if matched_repo_name:
                 print(f"Resolved repository to: {matched_repo_name}")
             print(f"Discovered {len(repos)} repositories to scan\n")
@@ -637,7 +596,7 @@ async def print_commits():
                 "release_prs": repo_payload,
             }
             print(json.dumps(payload, indent=2))
-        elif output_format == "console":
+        elif output_format in {"console", "text"}:
             separator = "=" * 60
             pr_divider = f"{DIM}{'-' * 60}{RESET}"
             for repo, prs in repo_results:
@@ -709,7 +668,7 @@ async def print_commits():
                         print(f"| Tags | {', '.join(tags)} |")
                     print()
 
-    if output_format in {"console", "markdown"}:
+    if output_format in {"console", "text", "markdown"}:
         print('END')
 
     if output_file:

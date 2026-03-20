@@ -1,12 +1,12 @@
+#!/usr/bin/env python3
 import asyncio
-import difflib
 import httpx
 import os
 import sys
 import re
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, get_deployable_topic
+from src.github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, get_deployable_topic, make_github_headers, get_repositories, select_repositories_by_name
 
 
 def _last_even_iso_week(year):
@@ -104,47 +104,6 @@ def parse_args():
 
     return org_name, team_name, repo_name_filter, target_week, write_output_file
 
-
-def _select_repositories_by_name(repos, repo_name_filter):
-    target = repo_name_filter.strip().lower()
-    target_repo_name = target.split("/", 1)[-1]
-
-    exact_matches = [
-        repo for repo in repos
-        if repo.get("name", "").lower() == target_repo_name
-        or repo.get("full_name", "").lower() == target
-        or repo.get("full_name", "").lower().endswith(f"/{target_repo_name}")
-    ]
-    if exact_matches:
-        return exact_matches, None
-
-    by_name = {repo.get("name", "").lower(): repo for repo in repos if repo.get("name")}
-    by_full_name = {repo.get("full_name", "").lower(): repo for repo in repos if repo.get("full_name")}
-    candidates = list(by_name.keys()) + list(by_full_name.keys())
-    close = difflib.get_close_matches(target, candidates, n=1, cutoff=0.75)
-    if not close:
-        close = difflib.get_close_matches(target_repo_name, list(by_name.keys()), n=1, cutoff=0.75)
-
-    if close:
-        key = close[0]
-        matched_repo = by_name.get(key) or by_full_name.get(key)
-        if matched_repo:
-            return [matched_repo], matched_repo.get("full_name")
-
-    return [], None
-
-
-async def get_repositories(client, org_name, team_name=None):
-    """Fetch repositories for the organization or team."""
-    if team_name:
-        base_url = f"https://api.github.com/orgs/{org_name}/teams/{team_name}/repos"
-    else:
-        base_url = f"https://api.github.com/orgs/{org_name}/repos"
-    params = {"per_page": 100, "type": "all", "sort": "full_name"}
-    repos = []
-    async for page in fetch_json_pages(client, base_url, params=params):
-        repos.extend(page)
-    return repos
 
 
 async def find_rc_prs(client, owner, repo_name, release_branch, version_prefix):
@@ -457,11 +416,7 @@ async def main():
         output_file = open(output_file_path, "w")
         sys.stdout = output_file
 
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    headers = make_github_headers(github_token)
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         # Get repositories
@@ -469,7 +424,7 @@ async def main():
         deployable_repos = [repo for repo in repos if deployable_topic in (repo.get("topics") or [])]
         resolved_repo_name = None
         if repo_name_filter:
-            deployable_repos, resolved_repo_name = _select_repositories_by_name(deployable_repos, repo_name_filter)
+            deployable_repos, resolved_repo_name = select_repositories_by_name(deployable_repos, repo_name_filter)
 
         # Process repositories concurrently
         semaphore = asyncio.Semaphore(8)
