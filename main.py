@@ -235,10 +235,10 @@ def parse_args():
         if lower.startswith("format="):
             try:
                 output_format = arg.split("=", 1)[1].lower()
-                if output_format not in {"text", "json", "markdown"}:
+                if output_format not in {"console", "json", "markdown"}:
                     raise ValueError
             except ValueError:
-                print("Invalid format argument. Use format=text, format=json, or format=markdown.")
+                print("Invalid format argument. Use format=console, format=json, or format=markdown.")
                 sys.exit(1)
         elif lower.startswith(("branch=", "branch_filter=", "branch-filter=")):
             try:
@@ -299,7 +299,7 @@ def parse_args():
             write_output_file = True
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]")
+            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=console|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]")
             sys.exit(1)
 
     if org_name is None:
@@ -316,11 +316,11 @@ def parse_args():
 
     if not org_name:
         print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
-        print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=text|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
+        print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=console|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
         sys.exit(1)
 
-    if output_format not in {"text", "json", "markdown"}:
-        print("Output format must be 'text', 'json', or 'markdown'")
+    if output_format not in {"console", "json", "markdown"}:
+        print("Output format must be 'console', 'json', or 'markdown'")
         sys.exit(1)
 
     if branch_filter not in {"all", "release", "dev"}:
@@ -506,7 +506,7 @@ async def print_commits():
 
     sprint_label = f"{label_prefix} ({format_timestamp(sprint_start_date, date_range_tz)} to {format_timestamp(sprint_end_date, date_range_tz)})"
 
-    ext = {"text": "txt", "json": "json", "markdown": "md"}[output_format]
+    ext = {"console": "txt", "json": "json", "markdown": "md"}[output_format]
     output_file_path = os.path.join("output", f"{version_label}.{ext}")
     output_file = None
     if write_output_file:
@@ -522,7 +522,7 @@ async def print_commits():
     def field(name, value, width=26):
         return f"{DIM}{name:<{width}}{RESET}: {value}"
 
-    if output_format == "text":
+    if output_format == "console":
         title = f"  {label_prefix}  "
         border = "=" * max(60, len(title))
         print(f"\n{BOLD}{CYAN}{border}{RESET}")
@@ -567,7 +567,7 @@ async def print_commits():
         matched_repo_name = None
         if repo_name_filter:
             repos, matched_repo_name = _select_repositories_by_name(repos, repo_name_filter)
-        if output_format == "text":
+        if output_format == "console":
             if matched_repo_name:
                 print(f"Resolved repository to: {matched_repo_name}")
             print(f"Discovered {len(repos)} repositories to scan\n")
@@ -637,7 +637,7 @@ async def print_commits():
                 "release_prs": repo_payload,
             }
             print(json.dumps(payload, indent=2))
-        elif output_format == "text":
+        elif output_format == "console":
             separator = "=" * 60
             pr_divider = f"{DIM}{'-' * 60}{RESET}"
             for repo, prs in repo_results:
@@ -709,7 +709,7 @@ async def print_commits():
                         print(f"| Tags | {', '.join(tags)} |")
                     print()
 
-    if output_format in {"text", "markdown"}:
+    if output_format in {"console", "markdown"}:
         print('END')
 
     if output_file:

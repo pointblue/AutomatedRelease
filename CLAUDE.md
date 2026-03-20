@@ -24,10 +24,10 @@ On first run without a `.env`, scripts will prompt for your GitHub token and cre
 python3 main.py org=my-org
 
 # View merged PRs for a specific sprint in text format
-python3 main.py org=my-org format=text week=2026.08
+python3 main.py org=my-org format=console week=2026.08
 
 # View a specific repo's PRs for a given week range
-python3 main.py org=my-org name=my-service format=text week=2026.07-11
+python3 main.py org=my-org name=my-service format=console week=2026.07-11
 
 # Create release candidate PRs (preview first)
 python3 main.py org=my-org format=json > sprint-prs.json
@@ -59,6 +59,10 @@ All three scripts share `github_utils.py`, which provides:
 **`create-confluence-page.py`** — reads a release notes markdown file (output of `create-release-notes.py`) and publishes it as a new Confluence page under the appropriate year page in the `IM` space. Aborts if the page already exists. Creates the year page automatically if it doesn't exist yet.
 
 **`create-release-notes.py`** — queries GitHub for merged RC PRs matching the target version. For each repo, finds the current and previous RC merge commits, then retrieves commits in that range. Filters to only PR-merge commits, fetches PR titles/bodies, and outputs markdown. Converts `PBT-XXXX` references to GitLab issue links.
+
+### Maintenance conventions
+
+- When changing CLI arguments, valid values, or behavior in any script, update `README.md` to match — including usage strings, argument descriptions, and examples.
 
 ### Key conventions
 
