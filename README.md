@@ -148,13 +148,14 @@ This script takes the JSON output from `main.py` and creates release candidate P
 
 This script generates markdown release notes for a release version (`vYYYY.WW`) across deployable repositories (topic from `DEPLOYABLE_TOPIC`, default `deployer-php`). It finds merged RC PRs for the target version and builds notes from commits tied to those RC PRs.
 
-**Usage:** `python3 create-release-notes.py [org=<org name>] [team=<team name>] [name=<repo name>] [week=YYYY.WW]`
+**Usage:** `python3 create-release-notes.py [org=<org name>] [team=<team name>] [name=<repo name>] [week=YYYY.WW] [--output]`
 
 **Arguments:**
   - `[org=<org name>]` (optional) - GitHub organization name. If omitted, `ORG_NAME` from `.env` is used.
   - `[team=<team name>]` (optional) - Filter repositories by team. If omitted, `TEAM_NAME` from `.env` is used when present.
   - `[name=<repo name>]` (optional) - Filter output to one repository. Supports repository name or full name. If no exact match is found, the closest repository name is used.
   - `[week=YYYY.WW]` (optional) - Target release version week (must be even). If omitted, current even week is used, or the most recent even week if the current week is odd.
+  - `[--output]` (optional) - Write output to `output/vYYYY.WW-release-notes.md` instead of stdout.
   - `week=YYYY.WW` is required when `name=<repo name>` is provided.
 
 **Examples:**
@@ -178,15 +179,15 @@ This script generates markdown release notes for a release version (`vYYYY.WW`) 
     ```bash
     python3 create-release-notes.py org=my-org name=my-service week=2026.08
     ```
+  * Write release notes to file:
+    ```bash
+    python3 create-release-notes.py org=my-org week=2026.08 --output
+    ```
 
 **Output format:**
   - Markdown grouped by repository
   - Includes release branch, current RC PR, and previous RC PR (if any)
-  - Commit entries include:
-    - short commit SHA (plain text)
-    - PR link (`#<number>` links to GitHub PR)
-    - PR title
-    - first non-empty paragraph from the PR body
+  - Each entry includes a PR link (`#<number>` linking to the GitHub PR), PR title, and first non-empty paragraph from the PR body
   - Any `PBT-XXXX` references (4 digits) in rendered text are converted to GitLab issue links:
     - `https://pblgssgitlab01.aws.pointblue.org/point-blue-engineering-team/point-blue-tech/-/issues/XXXX`
 
