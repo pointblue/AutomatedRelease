@@ -3,6 +3,9 @@ Shared utilities for GitHub API operations used across scripts.
 """
 import difflib
 import os
+import re
+import sys
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 
@@ -152,3 +155,181 @@ def get_deployable_topic():
     Defaults to 'deployer-php' when not configured.
     """
     return os.getenv("DEPLOYABLE_TOPIC", "deployer-php").strip().lower()
+
+
+def _last_even_iso_week(year):
+    last_week = datetime(year, 12, 28).isocalendar()[1]
+    if last_week % 2 != 0:
+        last_week -= 1
+    return last_week
+
+
+def get_sprintdates(now=None, target_week=None, range_tz=timezone.utc):
+    """
+    Calculate the current or most recent 2-week sprint dates based on even ISO week numbers.
+
+    Sprints run for 2 weeks, starting on the Monday of an odd ISO week and ending on the
+    Sunday of the following even ISO week. This function determines which sprint period
+    the current date falls into.
+
+    Args:
+        now: Optional datetime to use instead of current time (useful for testing)
+        target_week: Optional tuple of (year, week_number) to calculate a specific sprint
+
+    Returns:
+        tuple: (sprint_start, sprint_end, sprint_end_year, sprint_end_week, iso_week)
+    """
+    today = now or datetime.now(range_tz)
+    iso_year, iso_week, _ = today.isocalendar()
+
+    if target_week:
+        sprint_end_year, sprint_end_week = target_week
+    else:
+        if iso_week % 2 == 0:
+            sprint_end_week = iso_week
+            sprint_end_year = iso_year
+        else:
+            sprint_end_week = iso_week - 1
+            sprint_end_year = iso_year
+
+        if sprint_end_week < 1:
+            sprint_end_year -= 1
+            sprint_end_week = _last_even_iso_week(sprint_end_year)
+
+    even_week_monday = datetime.fromisocalendar(sprint_end_year, sprint_end_week, 1)
+    sprint_start = (even_week_monday - timedelta(weeks=1)).replace(tzinfo=range_tz).astimezone(timezone.utc)
+    sprint_end = (even_week_monday + timedelta(days=7) - timedelta(seconds=1)).replace(tzinfo=range_tz).astimezone(timezone.utc)
+
+    return sprint_start, sprint_end, sprint_end_year, sprint_end_week, iso_week
+
+
+def get_first_paragraph(description, pr_message):
+    if len(description) == 1 or description[1] in ['\n', '\r']:
+        pr_message += description[0]
+        return pr_message
+    elif description[1].startswith('-'):
+        pr_message += f'{description[0]}\n'
+    return get_first_paragraph(description[1:], pr_message)
+
+
+def parse_github_datetime(value):
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def parse_timezone_offset(value):
+    """
+    Parse timezone offset for date-range calculations.
+    Supported formats: 0, -8, 5.5, +05:30, -07:00
+    Returns a timezone object.
+    """
+    raw = (value or "0").strip()
+    if raw in {"0", "+0", "-0", "+00:00", "-00:00"}:
+        return timezone.utc
+
+    hhmm_match = re.fullmatch(r"([+-])(\d{2}):(\d{2})", raw)
+    if hhmm_match:
+        sign = -1 if hhmm_match.group(1) == "-" else 1
+        hours = int(hhmm_match.group(2))
+        minutes = int(hhmm_match.group(3))
+        if hours > 14 or minutes > 59:
+            raise ValueError
+        total_minutes = sign * (hours * 60 + minutes)
+        if total_minutes < -12 * 60 or total_minutes > 14 * 60:
+            raise ValueError
+        return timezone(timedelta(minutes=total_minutes))
+
+    decimal_match = re.fullmatch(r"[+-]?\d+(?:\.\d+)?", raw)
+    if decimal_match:
+        hours_float = float(raw)
+        if hours_float < -12 or hours_float > 14:
+            raise ValueError
+        total_minutes = int(round(hours_float * 60))
+        return timezone(timedelta(minutes=total_minutes))
+
+    raise ValueError
+
+
+def format_timestamp(dt, display_tz):
+    local = dt.astimezone(display_tz)
+    offset = local.strftime("%z")
+    offset = f"{offset[:3]}:{offset[3:]}"
+    return f"{local.strftime('%Y-%m-%d %H:%M:%S')} UTC{offset}"
+
+
+def get_date_range_timezone():
+    tz_raw = os.getenv("DATE_RANGE_TZ_OFFSET", "0")
+    try:
+        tzinfo = parse_timezone_offset(tz_raw)
+    except ValueError:
+        print("Invalid DATE_RANGE_TZ_OFFSET in .env. Use values like 0, -8, 5.5, +05:30, or -07:00.")
+        sys.exit(1)
+    return tzinfo, tz_raw.strip()
+
+
+def parse_week_value(week_value):
+    """
+    Parse week filter values:
+    - Single sprint end week: YYYY.WW
+    - Same-year range: YYYY.WW-WW
+    - Cross-year range: YYYY.WW-YYYY.WW
+    Returns a dict describing the parsed mode.
+    """
+    def _parse_year_week(token):
+        year_str, week_num_str = token.split(".")
+        year = int(year_str)
+        week_num = int(week_num_str)
+        if week_num < 1 or week_num > 53:
+            raise ValueError
+        datetime.fromisocalendar(year, week_num, 1)
+        return year, week_num
+
+    if "-" not in week_value:
+        year, week_num = _parse_year_week(week_value)
+        if week_num % 2 != 0:
+            raise ValueError("single_week_must_be_even")
+        return {"mode": "single", "start": (year, week_num), "end": None}
+
+    start_token, end_token = week_value.split("-", 1)
+    start_year, start_week = _parse_year_week(start_token)
+
+    if "." in end_token:
+        end_year, end_week = _parse_year_week(end_token)
+    else:
+        end_year = start_year
+        end_week = int(end_token)
+        if end_week < 1 or end_week > 53:
+            raise ValueError
+        datetime.fromisocalendar(end_year, end_week, 1)
+
+    start_date = datetime.fromisocalendar(start_year, start_week, 1)
+    end_date = datetime.fromisocalendar(end_year, end_week, 7)
+    if end_date < start_date:
+        raise ValueError("end_before_start")
+
+    return {"mode": "range", "start": (start_year, start_week), "end": (end_year, end_week)}
+
+
+def parse_time_offset(offset_value):
+    """
+    Parse a time offset string such as 1d, 1w, 12h, 1.5h.
+    """
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([hdwHDW])", offset_value.strip())
+    if not match:
+        raise ValueError
+
+    value = float(match.group(1))
+    unit = match.group(2).lower()
+    if value < 0:
+        raise ValueError
+
+    if unit == "h":
+        return timedelta(hours=value)
+    if unit == "d":
+        return timedelta(days=value)
+    if unit == "w":
+        return timedelta(weeks=value)
+    raise ValueError

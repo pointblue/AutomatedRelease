@@ -6,14 +6,10 @@ import sys
 import re
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from src.github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, get_deployable_topic, make_github_headers, get_repositories, select_repositories_by_name
-
-
-def _last_even_iso_week(year):
-    last_week = datetime(year, 12, 28).isocalendar()[1]
-    if last_week % 2 != 0:
-        last_week -= 1
-    return last_week
+from src.github_utils import (
+    get_gh_token, fetch_json_pages, get_main_or_master_branch, get_deployable_topic,
+    make_github_headers, get_repositories, select_repositories_by_name, get_sprintdates,
+)
 
 
 def parse_args():
@@ -91,16 +87,8 @@ def parse_args():
 
     # If no week specified, use current or most recent even week
     if not target_week:
-        today = datetime.now(timezone.utc)
-        iso_year, iso_week, _ = today.isocalendar()
-        if iso_week % 2 == 0:
-            target_week = (iso_year, iso_week)
-        else:
-            week_num = iso_week - 1
-            if week_num < 1:
-                iso_year -= 1
-                week_num = _last_even_iso_week(iso_year)
-            target_week = (iso_year, week_num)
+        _, _, sprint_end_year, sprint_end_week, _ = get_sprintdates()
+        target_week = (sprint_end_year, sprint_end_week)
 
     return org_name, team_name, repo_name_filter, target_week, write_output_file
 
@@ -140,7 +128,6 @@ async def find_rc_prs(client, owner, repo_name, release_branch, version_prefix):
                 # Parse merge date for sorting
                 if merged_at.endswith("Z"):
                     merged_at = merged_at[:-1] + "+00:00"
-                from datetime import datetime, timezone
                 merged_date = datetime.fromisoformat(merged_at).astimezone(timezone.utc)
 
                 title = pr.get("title", "").strip()  # Remove leading/trailing whitespace
