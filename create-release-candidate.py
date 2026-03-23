@@ -6,7 +6,7 @@ import os
 import sys
 import re
 from dotenv import load_dotenv
-from src.github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, check_commit_in_branch, make_github_headers
+from src.github_utils import get_gh_token, get_main_or_master_branch, make_github_headers
 
 
 def parse_args():
@@ -136,22 +136,24 @@ async def create_release_pr(client, owner, repo_name, release_branch, version_ti
         return False
 
 
-async def has_unreleased_prs(client, owner, repo_name, release_branch, pull_requests):
+async def has_unreleased_prs(client, owner, repo_name, release_branch):
     """
-    Determine if any PR commit is not yet in the release branch.
+    Determine if dev has commits not yet in the release branch.
+    Uses branch comparison rather than individual commit checks, so it works
+    correctly regardless of whether the release branch uses squash merges.
     """
-    for pr in pull_requests:
-        commit_id = pr.get("commit_id")
-        if not commit_id:
-            # If the source data does not include a commit id, treat as unreleased.
-            return True
-        in_release = await check_commit_in_branch(client, owner, repo_name, commit_id, release_branch)
-        if not in_release:
-            return True
-    return False
+    try:
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/compare/{release_branch}...dev"
+        response = await client.get(url)
+        response.raise_for_status()
+        compare_data = response.json()
+        status = compare_data.get("status")
+        return status in ["ahead", "diverged"]
+    except Exception:
+        return True
 
 
-async def process_repository(client, repo_name, pull_requests, version_prefix, semaphore, dry_run=False):
+async def process_repository(client, repo_name, version_prefix, semaphore, dry_run=False):
     """Process a single repository and create release candidate PR."""
     async with semaphore:
         try:
@@ -162,7 +164,7 @@ async def process_repository(client, repo_name, pull_requests, version_prefix, s
                 print(f"[WARNING] {repo_name}: No release branch found", file=sys.stderr)
                 return repo_name, False, None, "no_release_branch"
 
-            if not await has_unreleased_prs(client, owner, repo, release_branch, pull_requests):
+            if not await has_unreleased_prs(client, owner, repo, release_branch):
                 print(f"[SKIP] {repo_name}: Skipping (all PRs already in {release_branch})", file=sys.stderr)
                 return repo_name, False, None, "all_released"
 
@@ -225,11 +227,9 @@ async def main():
 
         for repo_data in input_data.get("release_prs", []):
             repo_name = repo_data.get("repository")
-            pull_requests = repo_data.get("pull_requests", [])
-
             if repo_name:
                 task = asyncio.create_task(
-                    process_repository(client, repo_name, pull_requests, version_prefix, semaphore, dry_run)
+                    process_repository(client, repo_name, version_prefix, semaphore, dry_run)
                 )
                 tasks.append(task)
 

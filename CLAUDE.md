@@ -50,14 +50,13 @@ All three scripts share `github_utils.py`, which provides:
 - `get_gh_token()` — reads `GITHUB_TOKEN` from env or prompts user
 - `fetch_json_pages()` — async generator that handles GitHub API pagination
 - `get_main_or_master_branch()` — detects release branch name (`main` or `master`)
-- `check_commit_in_branch()` — uses GitHub compare API to test if a commit is already in a branch
 - `get_deployable_topic()` — reads `DEPLOYABLE_TOPIC` from env (default: `deployer-php`)
 
 ### Script responsibilities
 
 **`main.py`** — fetches merged PRs within a sprint window across all deployable repos in an org/team. Uses async concurrency (semaphore of 8). Outputs JSON (piped to `create-release-candidate.py`) or human-readable text. Sprint dates are computed from even ISO week numbers: each sprint starts Monday of an odd week and ends Sunday of the following even week.
 
-**`create-release-candidate.py`** — reads JSON output from `main.py`. For each repo with unreleased commits (checked via `check_commit_in_branch`), creates a `dev → main/master` PR titled `vYYYY.WW-rcN` where N is auto-incremented. Skips repos where all PRs are already released or where an open RC PR already exists.
+**`create-release-candidate.py`** — reads JSON output from `main.py`. For each repo where `dev` is ahead of the release branch, creates a `dev → main/master` PR titled `vYYYY.WW-rcN` where N is auto-incremented. Skips repos where `dev` has no commits ahead of the release branch, or where an open RC PR already exists.
 
 **`create-confluence-page.py`** — reads a release notes markdown file (output of `create-release-notes.py`) and publishes it as a new Confluence page under the appropriate year page in the `IM` space. Aborts if the page already exists. Creates the year page automatically if it doesn't exist yet.
 

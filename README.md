@@ -132,12 +132,13 @@ This script takes the JSON output from `main.py` and creates release candidate P
   - Reads the sprint version from the JSON (e.g., `v2026.10`)
   - For each repository in the JSON input:
     - Detects the release branch (`main` or `master`)
-    - Checks each PR merge commit from `main.py` output to see if it exists in the release branch
-  - For repositories with unreleased PR commits:
+    - Compares the `dev` branch against the release branch to check for unreleased commits
+  - For repositories where `dev` is ahead of the release branch:
     - Checks for existing release candidate PRs (e.g., `v2026.10-rc0`, `v2026.10-rc1`)
     - Creates a new PR with the next RC number (e.g., `v2026.10-rc2`)
     - Creates PR from `dev` branch to release branch (`main` or `master`)
-  - Skips repositories where all PRs are already in the release branch
+  - Skips repositories where `dev` has no commits ahead of the release branch
+  - Works correctly regardless of whether the release branch uses regular or squash merges
 
 **Requirements:**
   - Your GitHub token must have full `repo` permissions to create PRs
