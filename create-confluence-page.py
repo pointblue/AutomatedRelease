@@ -45,6 +45,24 @@ def find_page_by_title(client, base_url, title):
     return results[0] if results else None
 
 
+def move_page_to_top(client, base_url, year_page_id, new_page_id):
+    """Move the newly created page to appear first among its siblings."""
+    url = f"{base_url}/rest/api/content/{year_page_id}/child/page"
+    response = client.get(url, params={"limit": 50})
+    response.raise_for_status()
+    children = response.json().get("results", [])
+
+    siblings = [c for c in children if c["id"] != new_page_id]
+    if not siblings:
+        return  # New page is the only child, already first
+
+    # Move before the sibling with the highest-sorted title (most recent existing release)
+    top_sibling = max(siblings, key=lambda c: c.get("title", ""))
+    move_url = f"{base_url}/rest/api/content/{new_page_id}/move/before/{top_sibling['id']}"
+    response = client.put(move_url)
+    response.raise_for_status()
+
+
 def create_page(client, base_url, title, parent_id, body_html, draft=False):
     url = f"{base_url}/rest/api/content"
     payload = {
@@ -66,7 +84,11 @@ def create_page(client, base_url, title, parent_id, body_html, draft=False):
 
 
 def markdown_to_storage(content):
-    return md_lib.markdown(content, extensions=["tables"])
+    html = md_lib.markdown(content, extensions=["tables"])
+    # The markdown library emits <br />\n for two-trailing-space line breaks.
+    # Confluence renders the \n after <br> as an extra blank line, so strip it.
+    html = re.sub(r'<br\s*/?>\n', '<br />', html)
+    return html
 
 
 def main():
@@ -125,6 +147,11 @@ def main():
         # Convert markdown and create the sprint release page
         body_html = markdown_to_storage(md_content)
         new_page = create_page(client, base_url, page_title, year_page_id, body_html, draft=draft)
+        if not draft:
+            try:
+                move_page_to_top(client, base_url, year_page_id, new_page["id"])
+            except Exception as e:
+                print(f"Warning: Page was created but could not be moved to the top: {e}")
         page_url = f"{base_url}{new_page['_links']['webui']}"
         print(f"Created {'draft' if draft else 'page'}: {page_title}")
         if draft:
