@@ -81,7 +81,7 @@ async def create_release_pr(client, owner, repo_name, release_branch, version_ti
             return False
 
         if dry_run:
-            print(f"  [DRY RUN] Would create PR: {version_title} from dev -> {release_branch}")
+            print(f"  [DRY RUN] Would create PR: {version_title} for {owner}/{repo_name} from dev -> {release_branch}")
             return True
 
         # Create the PR
