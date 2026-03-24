@@ -177,7 +177,7 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
             base_branch = (pull.get("base") or {}).get("ref", "")
             if base_branch not in allowed_branches:
                 continue
-            pr_date = parse_github_datetime(pull.get("merged_at") or pull.get("closed_at") or pull.get("updated_at"))
+            pr_date = parse_github_datetime(pull.get("merged_at"))
             if not pr_date:
                 continue
 
