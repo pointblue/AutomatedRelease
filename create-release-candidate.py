@@ -6,7 +6,7 @@ import os
 import sys
 import re
 from dotenv import load_dotenv
-from src.github_utils import get_gh_token, get_main_or_master_branch, make_github_headers
+from src.github_utils import get_gh_token, fetch_json_pages, get_main_or_master_branch, make_github_headers
 
 
 def parse_args():
