@@ -256,6 +256,53 @@ def extract_first_paragraph(commit_message):
     return ' '.join(paragraph_lines)
 
 
+def strip_markdown_formatting(text):
+    """Remove markdown formatting that would corrupt the release notes layout.
+
+    The extracted paragraph is embedded as an indented description line beneath a
+    bullet, so markdown in it (headings, blockquotes, emphasis, list markers) is
+    re-interpreted by the renderer and breaks the layout. This strips those
+    formatting markers while keeping the visible text.
+
+    Links (``[text](url)``) and inline code spans (`` `code` ``) are preserved.
+    """
+    if not text:
+        return text
+
+    placeholders = []
+
+    def _stash(match):
+        placeholders.append(match.group(0))
+        return f"\x00{len(placeholders) - 1}\x00"
+
+    # Protect inline code spans and links first so their contents are untouched
+    # by the strippers below (also covers image syntax via the optional "!").
+    text = re.sub(r"`[^`]+`", _stash, text)
+    text = re.sub(r"!?\[[^\]]+\]\([^)]+\)", _stash, text)
+
+    # Heading markers (e.g. leading "# ", "## "). Requires a trailing space so
+    # issue refs like "#77" and identifiers like "C#" are left untouched.
+    text = re.sub(r"(^|\s)#{1,6}[ \t]+", r"\1", text)
+    # Blockquote markers.
+    text = re.sub(r"(^|\s)>[ \t]?", r"\1", text)
+    # Note: bullet/list markers are intentionally preserved so bullet lists in
+    # the PR description survive into the release notes.
+
+    # Unwrap paired emphasis, keeping the inner text (longest markers first).
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    text = re.sub(r"~~(.+?)~~", r"\1", text)
+    text = re.sub(r"\*(.+?)\*", r"\1", text)
+    # Single-underscore italics only when bounded by non-word characters, so
+    # identifiers like Update_sproc_RenameProject are preserved.
+    text = re.sub(r"(?<!\w)_([^_]+?)_(?!\w)", r"\1", text)
+
+    # Restore the protected spans and tidy up any doubled whitespace.
+    text = re.sub(r"\x00(\d+)\x00", lambda m: placeholders[int(m.group(1))], text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
 def extract_first_non_empty_paragraph(text):
     """Extract the first non-empty paragraph from free-form text."""
     if not text:
@@ -272,10 +319,14 @@ def extract_first_non_empty_paragraph(text):
             continue
         paragraph_lines.append(stripped)
 
-    result = " ".join(paragraph_lines)
+    # Keep line breaks so bullet lists stay on separate lines (wrapped prose
+    # still renders as one paragraph once indented under the entry).
+    result = "\n".join(paragraph_lines)
     # Strip any HTML tags — PR bodies sometimes contain raw HTML (e.g. copy-pasted
     # from a browser), which breaks Confluence's storage format parser.
     result = re.sub(r'<[^>]+>', '', result)
+    # Strip markdown formatting so it doesn't break the (markdown) release notes.
+    result = strip_markdown_formatting(result)
     return result.strip()
 
 
@@ -462,7 +513,10 @@ async def main():
                 for commit in repo_data['commits']:
                     if commit.get('description'):
                         print(f"- {commit['message']}  ")
-                        print(f"  {commit['description']}")
+                        # Indent each line 2 spaces so the description nests under
+                        # the entry (and bullet lists render as a nested list).
+                        for line in commit['description'].split("\n"):
+                            print(f"  {line}")
                     else:
                         print(f"- {commit['message']}")
                 print()

@@ -1,6 +1,10 @@
 # AutomatedRelease
 
-This repo provides scripts to help manage releases for Agile sprint periods:
+This repo provides tooling to manage releases for Agile sprint periods.
+
+**The preferred way to create a release is the guided `release-wizard.py` script** — see [Release Wizard (Recommended)](#release-wizard-recommended) below. It walks you through the entire process end to end (pick a sprint → review in-scope PRs → create release candidates → merge them → verify → generate release notes → publish to Confluence), confirming at every step.
+
+The wizard orchestrates a set of underlying scripts. You don't need to run these directly for a normal release, but they remain fully available and documented for finer control or for performing a single step manually (see [Manual Usage (Individual Scripts)](#manual-usage-individual-scripts)):
 
 1. **`main.py`** - Outputs merged PRs from the last 2-week sprint for every repo within the given organization. Shows PR details including commit IDs and tags.
 
@@ -14,25 +18,57 @@ This repo provides scripts to help manage releases for Agile sprint periods:
 
 Only repositories tagged with the topic from `DEPLOYABLE_TOPIC` in `.env` are considered deployable (defaults to `deployer-php`). If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
 
-## Authentication Instructions
-	
- 1.  Github Token Verification
-   - You need a GitHub Personal Access Token to authenticate Python with GitHub. If you don't have a token, follow the
-steps below to generate one:
-     - Visit [GitHub Personal Access Tokens](https://github.com/settings/tokens) page.
-     - Click on "Generate token" and provide the following permissions:
-       - **For `main.py` (read-only)**: `read:org` and `repo` (read access)
-       - **For `create-release-candidate.py` (creates PRs)**: `read:org` and full `repo` permissions
-     - Copy the generated token.
-   - On first run, the script will prompt you to enter your token and will automatically create an `.env` file; you may also do this manually via `cp .env.example .env` and
-   paste your token in yourself.
+## Prerequisites
 
- 2.   Running the Scripts
-  * Clone the repo 'AutomatedRelease' to your machine
-  * Install dependencies (listed below)
-    * `pip install httpx`
-    * `pip install python-dotenv`
-  * If a `.env` file does not already exist, you will be prompted to enter your GitHub token and a `.env` file will be created automatically
+These are required before running **any** of the scripts, including the wizard:
+
+1. **Dependencies installed** — `pip install httpx python-dotenv markdown` (see [Dependencies](#dependencies) for details).
+
+2. **A GitHub Personal Access Token** to authenticate with GitHub.
+   - Generate one at [GitHub Personal Access Tokens](https://github.com/settings/tokens) with the permissions you need:
+     - **Read-only** (e.g. viewing sprint PRs with `main.py`): `read:org` and `repo` (read access)
+     - **Creating PRs** (the wizard and `create-release-candidate.py`): `read:org` and full `repo`
+   - On first run you'll be prompted for the token and a `.env` will be created automatically; you can also do this manually via `cp .env.example .env` and paste the token in yourself.
+
+3. **A configured `.env`** — set `ORG_NAME` (and optional `TEAM_NAME`). To publish release notes to Confluence, also set `CONFLUENCE_EMAIL` and `CONFLUENCE_API_TOKEN`.
+
+## Release Wizard (Recommended)
+
+`release-wizard.py` is the primary, recommended way to cut a release. It ties the whole process together into an interactive, step-by-step flow with an explicit confirmation at every gate. It is a thin orchestrator: it reuses the sprint-date logic from `src/github_utils.py` and runs the underlying scripts under the hood (parsing their output), so their individual behavior is unchanged.
+
+For a normal release you only need this script — you do not need to run the individual scripts yourself.
+
+**First-time setup:** make sure you've met the [Prerequisites](#prerequisites) above — dependencies installed and your `.env` configured (GitHub token, org/team, and Confluence credentials for the publish step).
+
+**Usage:** `python3 release-wizard.py [org=<org name>] [team=<team name>]`
+
+**Arguments:**
+  - `[org=<org name>]` (optional) - GitHub organization name. If omitted, `ORG_NAME` from `.env` is used. The wizard aborts immediately if neither is set.
+  - `[team=<team name>]` (optional) - Filter by team. If omitted, `TEAM_NAME` from `.env` is used when present.
+
+**The guided flow:**
+  1. **Select a sprint** - choose previous, current, or next; each is shown with its `vYYYY.WW` version and date window. The current sprint is the default (press Enter to select it).
+  2. **Review PRs in scope** - runs `main.py format=console` and shows its output so you can see exactly what merged this sprint. If the sprint has no PRs (common for the *next* sprint), you can pick a different one.
+  3. **Create release candidates** - once you confirm, the wizard generates the JSON input (`output/vYYYY.WW.json`), previews with a dry run, asks for explicit confirmation, then runs `create-release-candidate.py` and lists the created RC PR links.
+  4. **Merge the RC PRs (manual)** - the wizard prints the PR links and waits. You open and merge each one yourself in GitHub; this friction is intentional.
+  5. **Verify** - re-runs the dry run to confirm which repos are now fully merged versus still have an open, un-merged RC PR. If any remain un-merged, it loops back so you can merge them.
+  6. **Generate release notes** - runs `create-release-notes.py --output` (writing `output/vYYYY.WW-release-notes.md`) and previews the result for your confirmation.
+  7. **Publish to Confluence (optional)** - if `CONFLUENCE_EMAIL`/`CONFLUENCE_API_TOKEN` are set and you confirm, runs `create-confluence-page.py` (with an optional `--draft`). If the Confluence credentials are missing, this step is skipped gracefully and the notes file is left in `output/`.
+
+You can abort at any prompt by typing `q` (or `quit`/`abort`); no further actions are taken.
+
+**Resuming an interrupted run:** the wizard records its progress to `output/.wizard-progress.json` (git-ignored). If you quit, are interrupted, or close the terminal partway through, the next run detects the unfinished release and offers to resume it — either at the *creating/merging release candidates* stage or the *release notes* stage. Resuming re-checks the live state on GitHub (which RC PRs exist and which are merged), so it continues correctly regardless of how far the previous run got. You can also decline and either discard the saved progress or start a different sprint. Progress is cleared automatically once a release completes.
+
+**Example:**
+```bash
+python3 release-wizard.py org=my-org
+```
+
+**Note:** This script reuses the underlying scripts, so it relies on the same `.env` configuration (GitHub token, org/team, and Confluence credentials for the publish step).
+
+## Manual Usage (Individual Scripts)
+
+For most releases you should use the [Release Wizard](#release-wizard-recommended) above, which runs these scripts for you in the correct order. The sections below document the individual scripts for finer control, troubleshooting, or running a single step on its own.
 
 ### main.py - View Sprint PRs
 
@@ -188,6 +224,7 @@ This script generates markdown release notes for a release version (`vYYYY.WW`) 
   - Markdown grouped by repository
   - Includes release branch, current RC PR, and previous RC PR (if any)
   - Each entry includes a PR link (`#<number>` linking to the GitHub PR), PR title, and first non-empty paragraph from the PR body
+  - Markdown formatting in that paragraph that would break the layout of the (markdown) release notes — headings, blockquotes, and emphasis (bold/italic) — is stripped. Bullet lists, links (`[text](url)`), and inline code spans (`` `code` ``) are preserved; bullet lists render as a nested list under the entry
   - Any `PBT-XXXX` references (4 digits) in rendered text are converted to GitLab issue links:
     - `https://pblgssgitlab01.aws.pointblue.org/point-blue-engineering-team/point-blue-tech/-/issues/XXXX`
 

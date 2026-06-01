@@ -86,7 +86,10 @@ def create_page(client, base_url, title, parent_id, body_html, draft=False):
 
 
 def markdown_to_storage(content):
-    html = md_lib.markdown(content, extensions=["tables"])
+    # tab_length=2 so the 2-space-indented sub-bullets in release-note entries
+    # are parsed as nested lists. With the library default (4), they would be
+    # flattened into siblings of the PR-level item.
+    html = md_lib.markdown(content, extensions=["tables"], tab_length=2)
     # The markdown library emits <br />\n for two-trailing-space line breaks.
     # Confluence renders the \n after <br> as an extra blank line, so strip it.
     html = re.sub(r'<br\s*/?>\n', '<br />', html)
