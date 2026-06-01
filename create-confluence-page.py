@@ -79,6 +79,8 @@ def create_page(client, base_url, title, parent_id, body_html, draft=False):
         },
     }
     response = client.post(url, json=payload)
+    if not response.is_success:
+        print(f"Confluence error ({response.status_code}): {response.text}", file=sys.stderr)
     response.raise_for_status()
     return response.json()
 

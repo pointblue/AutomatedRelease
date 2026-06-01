@@ -272,7 +272,11 @@ def extract_first_non_empty_paragraph(text):
             continue
         paragraph_lines.append(stripped)
 
-    return " ".join(paragraph_lines)
+    result = " ".join(paragraph_lines)
+    # Strip any HTML tags — PR bodies sometimes contain raw HTML (e.g. copy-pasted
+    # from a browser), which breaks Confluence's storage format parser.
+    result = re.sub(r'<[^>]+>', '', result)
+    return result.strip()
 
 
 def link_pbt_issues(text):
