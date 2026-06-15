@@ -82,6 +82,7 @@ All three scripts share `github_utils.py`, which provides:
 | `ORG_NAME` | (required if not passed as arg) | all |
 | `TEAM_NAME` | (optional) | all |
 | `DEPLOYABLE_TOPIC` | `deployer-php` | all |
+| `RELEASE_REPO_ORDER` | (optional) | `create-release-notes.py` |
 | `DATE_RANGE_TZ_OFFSET` | `0` | `main.py` |
 | `WEEK_OFFSET` | (optional) | `main.py` |
 | `CONFLUENCE_EMAIL` | (required) | `create-confluence-page.py` |

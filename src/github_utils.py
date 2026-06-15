@@ -2,6 +2,7 @@
 Shared utilities for GitHub API operations used across scripts.
 """
 import difflib
+import fnmatch
 import os
 import re
 import sys
@@ -155,6 +156,45 @@ def get_deployable_topic():
     Defaults to 'deployer-php' when not configured.
     """
     return os.getenv("DEPLOYABLE_TOPIC", "deployer-php").strip().lower()
+
+
+def get_release_repo_order():
+    """Parse RELEASE_REPO_ORDER from .env into an ordered list of match rules.
+
+    The value is a comma-separated list of patterns, highest priority first.
+    A pattern containing ``*`` is matched as a glob (``fnmatch``); any other
+    pattern is matched exactly. Both forms are tested against the repository's
+    full name (``org/repo``) and its short name (``repo``), case-insensitively.
+
+    Example (list deju* repos first, then pointblue/api, then any repo
+    containing "auth", then apps-login, then everything else)::
+
+        RELEASE_REPO_ORDER=*deju*,pointblue/api,*auth*,apps-login
+
+    Returns ``[]`` when unset, in which case callers fall back to plain
+    alphabetical ordering.
+    """
+    raw = os.getenv("RELEASE_REPO_ORDER", "")
+    return [pattern.strip().lower() for pattern in raw.split(",") if pattern.strip()]
+
+
+def release_repo_sort_key(full_name, rules):
+    """Sort key ordering ``full_name`` by the rules from get_release_repo_order().
+
+    Repos matching an earlier rule sort before those matching a later rule; a
+    repo matching no rule sorts last. The first matching rule wins, so a repo
+    that could match several rules takes its highest-priority position. Within
+    any single group, repos are ordered alphabetically by full name.
+    """
+    name = full_name.lower()
+    short = name.split("/", 1)[-1]
+    for index, rule in enumerate(rules):
+        if "*" in rule:
+            if fnmatch.fnmatch(name, rule) or fnmatch.fnmatch(short, rule):
+                return (index, name)
+        elif rule in (name, short):
+            return (index, name)
+    return (len(rules), name)
 
 
 def _last_even_iso_week(year):

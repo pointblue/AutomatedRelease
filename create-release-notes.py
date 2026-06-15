@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from src.github_utils import (
     get_gh_token, fetch_json_pages, get_main_or_master_branch, get_deployable_topic,
     make_github_headers, get_repositories, select_repositories_by_name, get_sprintdates,
+    get_release_repo_order, release_repo_sort_key,
 )
 
 
@@ -481,8 +482,11 @@ async def main():
             if result:
                 repo_results.append(result)
 
-        # Sort by repo name
-        repo_results.sort(key=lambda x: x["repo"])
+        # Order repos by the configurable RELEASE_REPO_ORDER rules, falling back
+        # to alphabetical (release_repo_sort_key sorts alphabetically within each
+        # group, and entirely alphabetically when no rules are configured).
+        repo_order_rules = get_release_repo_order()
+        repo_results.sort(key=lambda x: release_repo_sort_key(x["repo"], repo_order_rules))
 
         # Generate markdown output
         print(f"# Release Notes - {version_prefix}\n")

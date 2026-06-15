@@ -74,6 +74,10 @@ For most releases you should use the [Release Wizard](#release-wizard-recommende
 
 This script retrieves merged PRs from the last 2-week sprint and outputs details including commit IDs and tags.
 
+It also surfaces **nested feature-branch merges**: if a PR was merged into another feature branch and that branch was later merged to `dev` via its own PR, the inner PR is included in the output even though its base branch is not `dev`. These entries are annotated with the dev PR that carried them into the release (`Note: merged into dev via #<n>` in console/text/markdown, `merged_via_pr` in JSON). This relies on standard `Merge pull request #N` merge commits; feature-to-feature PRs that were squash- or rebase-merged are not detected.
+
+Repository order in the output follows the optional `RELEASE_REPO_ORDER` key in `.env` (same rules as [create-release-notes.py](#create-release-notespy---generate-release-notes)). When unset, repositories are ordered alphabetically by full name.
+
 **Usage:** `python3 main.py [org=<org name>] [team=<team name>] [name=<repo name>] [format=console|text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]`
 
 **Arguments:**
@@ -222,6 +226,7 @@ This script generates markdown release notes for a release version (`vYYYY.WW`) 
 
 **Output format:**
   - Markdown grouped by repository
+  - Repository order is controlled by the optional `RELEASE_REPO_ORDER` key in `.env` (see below). When unset, repositories are ordered alphabetically by full name
   - Includes release branch, current RC PR, and previous RC PR (if any)
   - Each entry includes a PR link (`#<number>` linking to the GitHub PR), PR title, and first non-empty paragraph from the PR body
   - Markdown formatting in that paragraph that would break the layout of the (markdown) release notes — headings, blockquotes, and emphasis (bold/italic) — is stripped. Bullet lists, links (`[text](url)`), and inline code spans (`` `code` ``) are preserved; bullet lists render as a nested list under the entry
@@ -235,6 +240,14 @@ This script generates markdown release notes for a release version (`vYYYY.WW`) 
   - Uses commits between the previous RC merge commit and the current RC merge commit
   - If there is no previous RC, uses commits contained in the current RC PR
   - Excludes RC commits and formats merged PR data as release notes
+
+**Repository ordering (`RELEASE_REPO_ORDER`):**
+  - Optional `.env` key. A comma-separated list of patterns, highest priority first
+  - A pattern containing `*` is matched as a glob (e.g. `*auth*` matches any repo whose name contains `auth`); any other pattern is an exact match (e.g. `my-org/api`, `my-login-app`)
+  - Each pattern is tested against both the repo's full name (`org/repo`) and short name (`repo`), case-insensitively
+  - Repos matching an earlier pattern are listed before repos matching a later pattern; repos matching no pattern are listed last. The first matching pattern wins for a repo that could match several
+  - Within any single group, repos are ordered alphabetically by full name
+  - Example: `RELEASE_REPO_ORDER='*dblib*,my-org/api,*auth*,my-login-app'` lists `dblib`-named repos first (alphabetically), then `my-orf/api`, then any repo containing `auth`, then `my-login-app`, then everything else
 
 
 ### create-confluence-page.py - Publish Release Notes to Confluence

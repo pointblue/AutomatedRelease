@@ -11,7 +11,7 @@ from src.github_utils import (
     get_gh_token, fetch_json_pages, get_deployable_topic, make_github_headers,
     get_repositories, select_repositories_by_name, get_sprintdates, get_first_paragraph,
     parse_github_datetime, parse_timezone_offset, format_timestamp, get_date_range_timezone,
-    parse_week_value, parse_time_offset,
+    parse_week_value, parse_time_offset, get_release_repo_order, release_repo_sort_key,
 )
 
 
@@ -156,6 +156,94 @@ async def fetch_repo_tags(client, owner, repo_name):
         return {}
 
 
+NESTED_MERGE_PATTERN = re.compile(r"Merge pull request #(\d+)")
+
+
+def build_pr_tuple(pull, commit_to_tags, via_pr=None):
+    """Build the per-PR tuple shared by every output format.
+
+    ``via_pr`` is the number of the dev-merged PR that carried this PR into the
+    release. It is ``None`` for PRs merged directly to a tracked branch and set
+    for nested feature->feature merges surfaced by ``expand_nested_prs``.
+    """
+    body = pull.get("body") or ""
+    full_description = body.split('\n') if body else None
+    message = get_first_paragraph(full_description, "") if full_description else ""
+    # Remove newline characters from the description
+    message = message.replace('\n', ' ').replace('\r', ' ').strip()
+    author = pull.get("user", {}).get("login", "unknown")
+    title = pull.get("title", "Untitled PR")
+    issue_match = re.search(r"((?:PBT|GSS)-\d+)", title)
+    gitlab_issue = issue_match.group(1) if issue_match else None
+    # Look up tags for the merge commit from pre-fetched mapping
+    merge_commit_sha = pull.get("merge_commit_sha")
+    tags = commit_to_tags.get(merge_commit_sha, []) if merge_commit_sha else []
+    pr_date = parse_github_datetime(pull.get("merged_at"))
+    return (pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags, merge_commit_sha, via_pr)
+
+
+async def fetch_pull(client, owner, name, pr_number):
+    """Fetch a single PR's details, or None on error."""
+    try:
+        resp = await client.get(f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}")
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
+
+
+async def fetch_pr_commit_messages(client, owner, name, pr_number):
+    """Return every commit message on a PR's branch."""
+    messages = []
+    try:
+        url = f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}/commits"
+        async for page in fetch_json_pages(client, url, params={"per_page": 100}):
+            for commit in page:
+                msg = (commit.get("commit") or {}).get("message", "")
+                if msg:
+                    messages.append(msg)
+    except Exception:
+        pass
+    return messages
+
+
+async def expand_nested_prs(client, owner, name, parent_pr_numbers, allowed_branches, commit_to_tags, seen):
+    """Surface feature->feature PR merges that reach dev through a dev-merged PR.
+
+    A PR merged into another feature branch (base not in ``allowed_branches``)
+    never appears via the base-branch filter, but its changes ship as soon as
+    that branch is merged to dev. For each dev PR, scan its branch commits for
+    ``Merge pull request #N`` entries and surface any such N as its own entry,
+    annotated (``via_pr``) with the dev PR it rode in on. Recurses so multi-level
+    nesting is captured; ``seen`` guards against duplicates and cycles.
+    """
+    results = []
+    # work items: (pr_to_scan, ride_in_dev_pr)
+    work = [(num, num) for num in parent_pr_numbers]
+    while work:
+        scan_num, ride_in = work.pop(0)
+        for msg in await fetch_pr_commit_messages(client, owner, name, scan_num):
+            match = NESTED_MERGE_PATTERN.search(msg)
+            if not match:
+                continue
+            nested_num = int(match.group(1))
+            if nested_num in seen:
+                continue
+            seen.add(nested_num)
+            pull = await fetch_pull(client, owner, name, nested_num)
+            if not pull or not pull.get("merged_at"):
+                continue
+            # Skip merges into a tracked branch — those are dev/release-level PRs,
+            # not the feature->feature merges we are trying to surface.
+            base_ref = (pull.get("base") or {}).get("ref", "")
+            if base_ref in allowed_branches:
+                continue
+            results.append(build_pr_tuple(pull, commit_to_tags, via_pr=ride_in))
+            # The feature branch may itself contain further nested merges.
+            work.append((nested_num, ride_in))
+    return results
+
+
 async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, ignore_date_range=False):
     owner = repo["owner"]["login"]
     name = repo["name"]
@@ -168,6 +256,7 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
     }
 
     sprint_prs = []
+    direct_pr_numbers = []
     async for page in fetch_json_pages(client, url, params=params):
         if not page:
             break
@@ -186,24 +275,22 @@ async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_da
                 break
 
             if ignore_date_range or pr_date <= sprint_end_date:
-                body = pull.get("body") or ""
-                full_description = body.split('\n') if body else None
-                message = get_first_paragraph(full_description, "") if full_description else ""
-                # Remove newline characters from the description
-                message = message.replace('\n', ' ').replace('\r', ' ').strip()
-                author = pull.get("user", {}).get("login", "unknown")
-                title = pull.get("title", "Untitled PR")
-                issue_match = re.search(r"((?:PBT|GSS)-\d+)", title)
-                gitlab_issue = issue_match.group(1) if issue_match else None
-
-                # Look up tags for the merge commit from pre-fetched mapping
-                merge_commit_sha = pull.get("merge_commit_sha")
-                tags = commit_to_tags.get(merge_commit_sha, []) if merge_commit_sha else []
-
-                sprint_prs.append((pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags, merge_commit_sha))
+                sprint_prs.append(build_pr_tuple(pull, commit_to_tags))
+                if pull.get("number") is not None:
+                    direct_pr_numbers.append(pull["number"])
 
         if reached_before_sprint_window:
             break
+
+    # Surface feature->feature PR merges that reached dev through these dev PRs
+    # (e.g. a PR merged into another feature branch, then that branch merged to
+    # dev). They never match the base-branch filter above, but their changes
+    # ship with the release, so they belong in the sprint scope.
+    seen = set(direct_pr_numbers)
+    sprint_prs.extend(
+        await expand_nested_prs(client, owner, name, direct_pr_numbers, allowed_branches, commit_to_tags, seen)
+    )
+
     sprint_prs.sort(key=lambda x: x[0])
     return sprint_prs
 
@@ -353,11 +440,17 @@ async def print_commits():
             if prs:
                 repo_results.append((repo, prs))
 
+        # Order repos by the configurable RELEASE_REPO_ORDER rules (alphabetical
+        # within each group, and entirely alphabetical when no rules are set).
+        # Tasks complete out of order, so this also makes output deterministic.
+        repo_order_rules = get_release_repo_order()
+        repo_results.sort(key=lambda item: release_repo_sort_key(item[0].get('full_name') or "", repo_order_rules))
+
         if output_format == "json":
             repo_payload = []
             for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
-                def _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id):
+                def _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr):
                     entry = {
                         "date": pr_date.isoformat(),
                     }
@@ -372,13 +465,15 @@ async def print_commits():
                         "tags": tags,
                         "commit_id": commit_id,
                     })
+                    if via_pr is not None:
+                        entry["merged_via_pr"] = via_pr
                     return entry
 
                 repo_payload.append({
                     "repository": repo_name,
                     "pull_requests": [
-                        _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id)
-                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs
+                        _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr)
+                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr in prs
                     ],
                 })
             payload = {
@@ -404,7 +499,7 @@ async def print_commits():
                 print(f"\n{BOLD}{CYAN}{separator}{RESET}")
                 print(f"{BOLD}{WHITE}  {repo_name}{RESET}")
                 print(f"{BOLD}{CYAN}{separator}{RESET}\n")
-                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs:
+                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     if date_range_tz != timezone.utc:
                         print(field("Date (local)", format_timestamp(pr_date, date_range_tz), width=12))
@@ -416,6 +511,8 @@ async def print_commits():
                     print(field("Author", author, width=12))
                     print(field("Description", pr_message, width=12))
                     print(field("Link", pr_link, width=12))
+                    if via_pr is not None:
+                        print(field("Note", f"merged into dev via #{via_pr}", width=12))
                     if tags:
                         print(field("Tags", ", ".join(tags), width=12))
                     print(pr_divider)
@@ -448,7 +545,7 @@ async def print_commits():
             for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
                 print(f"\n## {repo_name}\n")
-                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id in prs:
+                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr in prs:
                     formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
                     print(f"| | {pr_title} |")
                     print("|---|---|")
@@ -464,6 +561,8 @@ async def print_commits():
                     print(f"| Author | {author} |")
                     print(f"| Description | {pr_message} |")
                     print(f"| Link | {pr_link} |")
+                    if via_pr is not None:
+                        print(f"| Note | merged into dev via #{via_pr} |")
                     if tags:
                         print(f"| Tags | {', '.join(tags)} |")
                     print()
