@@ -22,15 +22,17 @@ Only repositories tagged with the topic from `DEPLOYABLE_TOPIC` in `.env` are co
 
 These are required before running **any** of the scripts, including the wizard:
 
-1. **Dependencies installed** — `pip install httpx python-dotenv markdown` (see [Dependencies](#dependencies) for details).
+1. **Python 3.7 or later** — all scripts require Python 3.7+ (`asyncio.run` is the binding constraint). Any modern 3.x release (3.10+) works fine.
 
-2. **A GitHub Personal Access Token** to authenticate with GitHub.
+2. **Dependencies installed** — `pip install httpx python-dotenv markdown` (see [Dependencies](#dependencies) for details).
+
+3. **A GitHub Personal Access Token** to authenticate with GitHub.
    - Generate one at [GitHub Personal Access Tokens](https://github.com/settings/tokens) with the permissions you need:
      - **Read-only** (e.g. viewing sprint PRs with `main.py`): `read:org` and `repo` (read access)
      - **Creating PRs** (the wizard and `create-release-candidate.py`): `read:org` and full `repo`
    - On first run you'll be prompted for the token and a `.env` will be created automatically; you can also do this manually via `cp .env.example .env` and paste the token in yourself.
 
-3. **A configured `.env`** — set `ORG_NAME` (and optional `TEAM_NAME`). To publish release notes to Confluence, also set `CONFLUENCE_EMAIL` and `CONFLUENCE_API_TOKEN`.
+4. **A configured `.env`** — set `ORG_NAME` (and optional `TEAM_NAME`). To publish release notes to Confluence, also set `CONFLUENCE_EMAIL` and `CONFLUENCE_API_TOKEN`.
 
 ## Release Wizard (Recommended)
 
