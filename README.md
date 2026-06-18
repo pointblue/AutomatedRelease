@@ -16,6 +16,8 @@ The wizard orchestrates a set of underlying scripts. You don't need to run these
 
 5. **`create-confluence-page.py`** - Publishes a release notes markdown file to Confluence as a new page under the appropriate year page.
 
+6. **`deploy-release.py`** - Deploys the release-ready software for a sprint. Discovers which cloned repos have the sprint's release candidate merged to their release branch and deploys them with the deploy commands configured in `.env`, rolling back any ad-hoc deployments first and restoring every touched repo if any deployment fails.
+
 Only repositories tagged with the topic from `DEPLOYABLE_TOPIC` in `.env` are considered deployable (defaults to `deployer-php`). If you do not already have a `.env` file configured for this repo, one will be created and configured for you. 
 
 ## Prerequisites
@@ -287,6 +289,59 @@ This script reads a release notes markdown file (produced by `create-release-not
 **Required `.env` keys:**
   - `CONFLUENCE_EMAIL` — your Atlassian account email
   - `CONFLUENCE_API_TOKEN` — generate one by going to your Atlassian account settings → [Security](https://id.atlassian.com/manage-profile/security) → API tokens
+
+
+### deploy-release.py - Deploy a Sprint Release
+
+This script deploys the software that is ready for a sprint release. It discovers which repos cloned under `DEPLOY_SOURCE_REPO_PATH` have the sprint's release candidate (`vYYYY.WW-rcN`) merged to their release branch and deploys each one using the deploy and rollback commands configured in `.env`.
+
+Discovery is done entirely with local git — **no GitHub token or API access is required**. The sprint version is computed the same way as `main.py` (the current sprint by default, or a specific one via `week=`).
+
+**Usage:** `python3 deploy-release.py [week=YYYY.WW] [target=<deploy target>] [name=<repo name>] [--dry-run] [--yes] [--output]`
+
+**Arguments:**
+  - `[week=YYYY.WW]` (optional) - Release a specific sprint (week must be even). Defaults to the current sprint.
+  - `[target=<deploy target>]` (optional) - Override the deploy target. Defaults to `DEPLOY_DEFAULT_DEPLOY_TARGET`.
+  - `[name=<repo name>]` (optional) - Limit the run to a single repo directory.
+  - `[--dry-run]` (optional) - Discover the targeted repos and print the plan, but run no deploy/rollback commands.
+  - `[--yes]` (optional) - Skip the interactive confirmation (for non-interactive use).
+  - `[--output]` (optional) - Also write the full run log to `output/vYYYY.WW-deploy.log`.
+
+**Examples:**
+  * Preview what would deploy for the current sprint:
+    ```bash
+    python3 deploy-release.py --dry-run
+    ```
+  * Deploy a specific sprint after confirming the plan:
+    ```bash
+    python3 deploy-release.py week=2026.08
+    ```
+  * Deploy non-interactively to an explicit target and save a log:
+    ```bash
+    python3 deploy-release.py week=2026.08 target=<deploy target> --yes --output
+    ```
+
+**How it works:**
+  - Walks each repo under `DEPLOY_SOURCE_REPO_PATH`, runs `git fetch --all --prune`, and detects the release branch (`main` or `master`)
+  - A repo is targeted for release only if the target version's RC commit is present on its release branch
+  - For each targeted repo it captures the currently-deployed branch and revision (from `DEPLOY_REPO_DEPLOY_STATUS_FILENAME`) **before** changing anything — this snapshot is what a failure is restored to
+  - Deploys repos sequentially, in `RELEASE_REPO_ORDER` (then alphabetical). If a repo is currently on an ad-hoc branch (not `main`/`master`), its ad-hoc deployment is rolled back before the official release is deployed
+  - **If any deployment fails, every repo touched in the run is restored to its original state, then the script exits non-zero.** A repo that started on `main`/`master` is restored with a single rollback; a repo that started ad-hoc is restored by rolling back and then re-deploying its original revision (via `DEPLOY_DEPLOY_COMMAND_REVISION_FLAG`)
+
+**Requirements:**
+  - Run where the repos are cloned, as the user configured in `DEPLOY_USER`, with the deploy tool available on `PATH`
+  - All `DEPLOY_*` keys configured in `.env` (see below)
+
+**Required `.env` keys:**
+  - `DEPLOY_USER` — OS user the script expects to run as
+  - `DEPLOY_SOURCE_REPO_PATH` — directory holding the cloned repos
+  - `DEPLOY_DEPLOY_COMMAND` — deploy command; the target is appended
+  - `DEPLOY_ROLLBACK_COMMAND` — rollback command; the target is appended
+  - `DEPLOY_DEPLOY_COMMAND_REVISION_FLAG` — flag the deploy command uses to deploy a specific revision
+  - `DEPLOY_DEFAULT_DEPLOY_TARGET` — default deploy target
+  - `DEPLOY_REPO_DEPLOY_STATUS_FILENAME` — per-repo status file describing the last deployment
+  - `DEPLOY_REPO_DEPLOY_STATUS_BRANCH_KEY` — key in that file holding the deployed branch
+  - `DEPLOY_REPO_DEPLOY_STATUS_REV_KEY` — key in that file holding the deployed revision SHA
 
 
 ## Dependencies

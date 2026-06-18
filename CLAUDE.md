@@ -42,6 +42,10 @@ python3 create-release-notes.py org=my-org week=2026.08
 
 # Publish release notes to Confluence
 python3 create-confluence-page.py output/v2026.08-release-notes.md
+
+# Deploy a sprint release (preview first)
+python3 deploy-release.py week=2026.08 --dry-run
+python3 deploy-release.py week=2026.08
 ```
 
 ## Architecture
@@ -59,6 +63,8 @@ All three scripts share `github_utils.py`, which provides:
 **`create-release-candidate.py`** — reads JSON output from `main.py`. For each repo where `dev` is ahead of the release branch, creates a `dev → main/master` PR titled `vYYYY.WW-rcN` where N is auto-incremented. Skips repos where `dev` has no commits ahead of the release branch, or where an open RC PR already exists.
 
 **`create-confluence-page.py`** — reads a release notes markdown file (output of `create-release-notes.py`) and publishes it as a new Confluence page under the appropriate year page in the `IM` space. Aborts if the page already exists. Creates the year page automatically if it doesn't exist yet.
+
+**`deploy-release.py`** — deploys a sprint's release-ready software, running as the configured `DEPLOY_USER` wherever the repos are cloned. Discovery is purely local git (no GitHub API/token): for each repo under `DEPLOY_SOURCE_REPO_PATH` it fetches, detects the release branch, and treats the repo as targeted only if the target version's RC commit (`vYYYY.WW-rcN`) is present on that branch. Before mutating anything it snapshots each repo's currently-deployed branch/revision from the status file. Deploys are sequential (in `RELEASE_REPO_ORDER`, then alphabetical), using the configured deploy/rollback commands; a repo currently on an ad-hoc branch is rolled back before the official deploy. If any deploy fails, every touched repo is restored to its pre-run state — a single rollback for repos that started on main/master, and a rollback followed by a revision re-deploy (`DEPLOY_DEPLOY_COMMAND_REVISION_FLAG`) for repos that started ad-hoc. Uses `src/deploy_utils.py` (config, subprocess, status-file parsing). Reuses `get_sprintdates` for version selection.
 
 **`create-release-notes.py`** — queries GitHub for merged RC PRs matching the target version. For each repo, finds the current and previous RC merge commits, then retrieves commits in that range. Filters to only PR-merge commits, fetches PR titles/bodies, and outputs markdown. Converts `PBT-XXXX` references to GitLab issue links.
 
@@ -87,3 +93,12 @@ All three scripts share `github_utils.py`, which provides:
 | `WEEK_OFFSET` | (optional) | `main.py` |
 | `CONFLUENCE_EMAIL` | (required) | `create-confluence-page.py` |
 | `CONFLUENCE_API_TOKEN` | (required) | `create-confluence-page.py` |
+| `DEPLOY_USER` | (required) | `deploy-release.py` |
+| `DEPLOY_SOURCE_REPO_PATH` | (required) | `deploy-release.py` |
+| `DEPLOY_DEPLOY_COMMAND` | (required) | `deploy-release.py` |
+| `DEPLOY_ROLLBACK_COMMAND` | (required) | `deploy-release.py` |
+| `DEPLOY_DEPLOY_COMMAND_REVISION_FLAG` | (required) | `deploy-release.py` |
+| `DEPLOY_DEFAULT_DEPLOY_TARGET` | (required) | `deploy-release.py` |
+| `DEPLOY_REPO_DEPLOY_STATUS_FILENAME` | (required) | `deploy-release.py` |
+| `DEPLOY_REPO_DEPLOY_STATUS_BRANCH_KEY` | (required) | `deploy-release.py` |
+| `DEPLOY_REPO_DEPLOY_STATUS_REV_KEY` | (required) | `deploy-release.py` |
