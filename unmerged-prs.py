@@ -11,7 +11,7 @@ from src.github_utils import (
     get_gh_token, fetch_json_pages, get_deployable_topic, make_github_headers,
     get_repositories, select_repositories_by_name, get_sprintdates, get_first_paragraph,
     parse_github_datetime, parse_timezone_offset, format_timestamp, get_date_range_timezone,
-    parse_week_value, parse_time_offset, get_release_repo_order, release_repo_sort_key,
+    parse_week_value, parse_time_offset,
 )
 
 
@@ -49,10 +49,6 @@ def parse_args():
                 print("Invalid branch argument. Use branch=all, branch=release, or branch=dev.")
                 sys.exit(1)
         elif lower.startswith("week="):
-            # Parse week argument:
-            # - week=YYYY.WW
-            # - week=YYYY.WW-WW
-            # - week=YYYY.WW-YYYY.WW
             try:
                 week_str = arg.split("=", 1)[1]
                 week_filter = parse_week_value(week_str)
@@ -99,7 +95,7 @@ def parse_args():
             write_output_file = True
         else:
             print("Unrecognized argument.")
-            print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=console|text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]")
+            print("Usage: python3 unmerged-prs.py [org=<org>] [team=<team>] [name=<repo>] [format=console|text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>] [--output]")
             sys.exit(1)
 
     if org_name is None:
@@ -116,7 +112,7 @@ def parse_args():
 
     if not org_name:
         print("Missing organization name. Provide it as an argument or set ORG_NAME in .env.")
-        print("Usage: python3 main.py [org=<org>] [team=<team>] [name=<repo>] [format=console|json] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
+        print("Usage: python3 unmerged-prs.py [org=<org>] [team=<team>] [name=<repo>] [format=console|text|json|markdown] [branch=all|release|dev] [week=YYYY.WW|YYYY.WW-WW|YYYY.WW-YYYY.WW] [offset=<Nh|Nd|Nw>]")
         sys.exit(1)
 
     if output_format not in {"console", "text", "json", "markdown"}:
@@ -134,196 +130,218 @@ def parse_args():
     return org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw, write_output_file
 
 
-
-async def fetch_repo_tags(client, owner, repo_name):
-    """Fetch all tags for a repository and return a mapping of commit SHA to tag names."""
-    try:
-        url = f"https://api.github.com/repos/{owner}/{repo_name}/tags"
-        params = {"per_page": 100}
-        commit_to_tags = {}
-
-        async for page in fetch_json_pages(client, url, params=params):
-            for tag in page:
-                tag_name = tag.get("name", "")
-                commit_sha = tag.get("commit", {}).get("sha")
-                if commit_sha:
-                    if commit_sha not in commit_to_tags:
-                        commit_to_tags[commit_sha] = []
-                    commit_to_tags[commit_sha].append(tag_name)
-
-        return commit_to_tags
-    except Exception:
-        return {}
-
-
-NESTED_MERGE_PATTERN = re.compile(r"Merge pull request #(\d+)")
-
-
-def build_pr_tuple(pull, commit_to_tags, via_pr=None):
-    """Build the per-PR tuple shared by every output format.
-
-    ``via_pr`` is the number of the dev-merged PR that carried this PR into the
-    release. It is ``None`` for PRs merged directly to a tracked branch and set
-    for nested feature->feature merges surfaced by ``expand_nested_prs``.
+async def get_sprint_approvals(client, owner, repo_name, pr_number, sprint_start, sprint_end):
     """
-    body = pull.get("body") or ""
-    full_description = body.split('\n') if body else None
-    message = get_first_paragraph(full_description, "") if full_description else ""
-    # Remove newline characters from the description
-    message = message.replace('\n', ' ').replace('\r', ' ').strip()
-    author = pull.get("user", {}).get("login", "unknown")
-    title = pull.get("title", "Untitled PR")
-    issue_match = re.search(r"((?:PBT|GSS)-\d+)", title)
-    gitlab_issue = issue_match.group(1) if issue_match else None
-    # Look up tags for the merge commit from pre-fetched mapping
-    merge_commit_sha = pull.get("merge_commit_sha")
-    tags = commit_to_tags.get(merge_commit_sha, []) if merge_commit_sha else []
-    pr_date = parse_github_datetime(pull.get("merged_at"))
-    return (pr_date, title, message, pull.get("html_url"), author, gitlab_issue, tags, merge_commit_sha, via_pr)
-
-
-async def fetch_pull(client, owner, name, pr_number):
-    """Fetch a single PR's details, or None on error."""
+    Fetch reviews for a PR and determine approvals within the sprint window.
+    Uses each reviewer's latest review within the sprint to determine their final state.
+    Returns (approvers, latest_approval_at) or ([], None) if not approved within sprint.
+    """
     try:
-        resp = await client.get(f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}")
-        resp.raise_for_status()
-        return resp.json()
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls/{pr_number}/reviews"
+        params = {"per_page": 100}
+        reviews = []
+        async for page in fetch_json_pages(client, url, params=params):
+            reviews.extend(page)
+
+        # Filter to reviews within the sprint window
+        sprint_reviews = []
+        for review in reviews:
+            submitted_at = parse_github_datetime(review.get("submitted_at"))
+            if submitted_at and sprint_start <= submitted_at <= sprint_end:
+                sprint_reviews.append((review.get("user", {}).get("login", "unknown"), review.get("state"), submitted_at))
+
+        if not sprint_reviews:
+            return [], None
+
+        # Get each reviewer's latest review within the sprint
+        latest_by_user = {}
+        for login, state, submitted_at in sprint_reviews:
+            if login not in latest_by_user or submitted_at > latest_by_user[login][1]:
+                latest_by_user[login] = (state, submitted_at)
+
+        approvers = [login for login, (state, _) in latest_by_user.items() if state == "APPROVED"]
+        if not approvers:
+            return [], None
+
+        latest_approval_at = max(latest_by_user[login][1] for login in approvers)
+        return approvers, latest_approval_at
+
+    except Exception:
+        return [], None
+
+
+async def get_pr_mergeable(client, owner, repo_name, pr_number):
+    """
+    Fetch individual PR to get its mergeable status.
+    Returns True (can merge), False (has conflicts), or None (GitHub hasn't computed it yet).
+    """
+    try:
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls/{pr_number}"
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.json().get("mergeable")
     except Exception:
         return None
 
 
-async def fetch_pr_commit_messages(client, owner, name, pr_number):
-    """Return every commit message on a PR's branch."""
-    messages = []
+async def has_any_approval(client, owner, repo_name, pr_number):
+    """Check if a PR has at least one APPROVED review (at any time)."""
     try:
-        url = f"https://api.github.com/repos/{owner}/{name}/pulls/{pr_number}/commits"
-        async for page in fetch_json_pages(client, url, params={"per_page": 100}):
-            for commit in page:
-                msg = (commit.get("commit") or {}).get("message", "")
-                if msg:
-                    messages.append(msg)
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls/{pr_number}/reviews"
+        params = {"per_page": 100}
+        reviews = []
+        async for page in fetch_json_pages(client, url, params=params):
+            reviews.extend(page)
+        return any(r.get("state") == "APPROVED" for r in reviews)
     except Exception:
-        pass
-    return messages
+        return False
 
 
-async def expand_nested_prs(client, owner, name, parent_pr_numbers, allowed_branches, commit_to_tags, seen):
-    """Surface feature->feature PR merges that reach dev through a dev-merged PR.
+async def fetch_approved_merged_count(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore):
+    """Count PRs merged within the sprint that have at least one approval (at any time)."""
+    async with semaphore:
+        try:
+            owner = repo["owner"]["login"]
+            name = repo["name"]
+            url = f"https://api.github.com/repos/{owner}/{name}/pulls"
+            params = {
+                "state": "closed",
+                "sort": "updated",
+                "direction": "desc",
+                "per_page": 100,
+            }
 
-    A PR merged into another feature branch (base not in ``allowed_branches``)
-    never appears via the base-branch filter, but its changes ship as soon as
-    that branch is merged to dev. For each dev PR, scan its branch commits for
-    ``Merge pull request #N`` entries and surface any such N as its own entry,
-    annotated (``via_pr``) with the dev PR it rode in on. Recurses so multi-level
-    nesting is captured; ``seen`` guards against duplicates and cycles.
+            candidates = []
+            async for page in fetch_json_pages(client, url, params=params):
+                if not page:
+                    break
+
+                reached_before_sprint = False
+                for pull in page:
+                    base_branch = (pull.get("base") or {}).get("ref", "")
+                    if base_branch not in allowed_branches:
+                        continue
+
+                    merged_at = parse_github_datetime(pull.get("merged_at"))
+                    if not merged_at:
+                        continue  # closed but not merged
+
+                    if merged_at < sprint_start_date:
+                        reached_before_sprint = True
+                        break
+
+                    if merged_at <= sprint_end_date:
+                        candidates.append(pull)
+
+                if reached_before_sprint:
+                    break
+
+            if not candidates:
+                return 0
+
+            approval_results = await asyncio.gather(*[
+                has_any_approval(client, owner, name, pull["number"])
+                for pull in candidates
+            ])
+            return sum(1 for approved in approval_results if approved)
+
+        except Exception:
+            return 0
+
+
+async def fetch_approved_unmerged_prs(client, repo, sprint_start_date, sprint_end_date, allowed_branches):
     """
-    results = []
-    # work items: (pr_to_scan, ride_in_dev_pr)
-    work = [(num, num) for num in parent_pr_numbers]
-    while work:
-        scan_num, ride_in = work.pop(0)
-        for msg in await fetch_pr_commit_messages(client, owner, name, scan_num):
-            match = NESTED_MERGE_PATTERN.search(msg)
-            if not match:
-                continue
-            nested_num = int(match.group(1))
-            if nested_num in seen:
-                continue
-            seen.add(nested_num)
-            pull = await fetch_pull(client, owner, name, nested_num)
-            if not pull or not pull.get("merged_at"):
-                continue
-            # Skip merges into a tracked branch — those are dev/release-level PRs,
-            # not the feature->feature merges we are trying to surface.
-            base_ref = (pull.get("base") or {}).get("ref", "")
-            if base_ref in allowed_branches:
-                continue
-            results.append(build_pr_tuple(pull, commit_to_tags, via_pr=ride_in))
-            # The feature branch may itself contain further nested merges.
-            work.append((nested_num, ride_in))
-    return results
-
-
-async def fetch_prs_within_sprint(client, repo, sprint_start_date, sprint_end_date, allowed_branches, commit_to_tags, ignore_date_range=False):
+    Fetch open PRs that received an approval within the sprint window and can be merged.
+    Uses updated_at to stop fetching early — approvals update a PR's updated_at timestamp.
+    PRs with confirmed merge conflicts (mergeable=False) are excluded. PRs where GitHub
+    hasn't computed mergeability yet (mergeable=None) are included to avoid missing PRs.
+    """
     owner = repo["owner"]["login"]
     name = repo["name"]
     url = f"https://api.github.com/repos/{owner}/{name}/pulls"
     params = {
-        "state": "closed",
+        "state": "open",
         "sort": "updated",
         "direction": "desc",
         "per_page": 100,
     }
 
-    sprint_prs = []
-    direct_pr_numbers = []
+    candidates = []
     async for page in fetch_json_pages(client, url, params=params):
         if not page:
             break
 
-        reached_before_sprint_window = False
+        reached_before_sprint = False
         for pull in page:
             base_branch = (pull.get("base") or {}).get("ref", "")
             if base_branch not in allowed_branches:
                 continue
-            pr_date = parse_github_datetime(pull.get("merged_at"))
-            if not pr_date:
+
+            updated_at = parse_github_datetime(pull.get("updated_at"))
+            if not updated_at:
                 continue
 
-            if not ignore_date_range and pr_date < sprint_start_date:
-                reached_before_sprint_window = True
+            # Stop once PRs haven't been touched since sprint started
+            if updated_at < sprint_start_date:
+                reached_before_sprint = True
                 break
 
-            if ignore_date_range or pr_date <= sprint_end_date:
-                sprint_prs.append(build_pr_tuple(pull, commit_to_tags))
-                if pull.get("number") is not None:
-                    direct_pr_numbers.append(pull["number"])
+            candidates.append(pull)
 
-        if reached_before_sprint_window:
+        if reached_before_sprint:
             break
 
-    # Surface feature->feature PR merges that reached dev through these dev PRs
-    # (e.g. a PR merged into another feature branch, then that branch merged to
-    # dev). They never match the base-branch filter above, but their changes
-    # ship with the release, so they belong in the sprint scope.
-    seen = set(direct_pr_numbers)
-    sprint_prs.extend(
-        await expand_nested_prs(client, owner, name, direct_pr_numbers, allowed_branches, commit_to_tags, seen)
-    )
+    # Fetch reviews and mergeability for all candidates concurrently
+    review_tasks = [
+        get_sprint_approvals(client, owner, name, pull["number"], sprint_start_date, sprint_end_date)
+        for pull in candidates
+    ]
+    mergeable_tasks = [
+        get_pr_mergeable(client, owner, name, pull["number"])
+        for pull in candidates
+    ]
+    all_results = await asyncio.gather(*review_tasks, *mergeable_tasks)
+    review_results = all_results[:len(candidates)]
+    mergeable_results = all_results[len(candidates):]
+
+    sprint_prs = []
+    for pull, (approvers, approved_at), mergeable in zip(candidates, review_results, mergeable_results):
+        if not approvers:
+            continue
+        if mergeable is False:
+            continue
+
+        body = pull.get("body") or ""
+        full_description = body.split('\n') if body else None
+        message = get_first_paragraph(full_description, "") if full_description else ""
+        message = message.replace('\n', ' ').replace('\r', ' ').strip()
+        author = pull.get("user", {}).get("login", "unknown")
+        title = pull.get("title", "Untitled PR")
+        issue_match = re.search(r"((?:PBT|GSS)-\d+)", title)
+        gitlab_issue = issue_match.group(1) if issue_match else None
+
+        sprint_prs.append((approved_at, title, message, pull.get("html_url"), author, gitlab_issue, approvers))
 
     sprint_prs.sort(key=lambda x: x[0])
     return sprint_prs
 
 
-async def process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore, ignore_date_range=False):
+async def process_repository(client, repo, sprint_start_date, sprint_end_date, allowed_branches, semaphore):
     async with semaphore:
         try:
-            owner = repo["owner"]["login"]
-            name = repo["name"]
-            # Fetch tags once for the entire repo
-            commit_to_tags = await fetch_repo_tags(client, owner, name)
-            prs = await fetch_prs_within_sprint(
-                client,
-                repo,
-                sprint_start_date,
-                sprint_end_date,
-                allowed_branches,
-                commit_to_tags,
-                ignore_date_range=ignore_date_range,
-            )
+            prs = await fetch_approved_unmerged_prs(client, repo, sprint_start_date, sprint_end_date, allowed_branches)
             return repo, prs
         except httpx.HTTPError as exc:
             print(f"HTTP error while fetching repo {repo.get('full_name')}: {exc}")
             return repo, []
 
 
-async def print_commits():
+async def print_unmerged_prs():
     load_dotenv()
     org_name, team_name, output_format, branch_filter, week_filter, repo_name_filter, week_offset, week_offset_raw, write_output_file = parse_args()
     deployable_topic = get_deployable_topic()
     date_range_tz, date_range_tz_raw = get_date_range_timezone()
 
-    ###if the program can't find github token, it checks if path to dotenv file exists, if not, then it creates one and configures it
     github_token = get_gh_token()
 
     iso_year, iso_week, _ = datetime.now(date_range_tz).isocalendar()
@@ -346,7 +364,6 @@ async def print_commits():
         version_label = f"v{sprint_end_year}.{sprint_end_week:02d}"
         label_prefix = f"Sprint {version_label}"
 
-    # Shift the date window by offset: start is delayed, end is extended by the same offset.
     if week_offset != timedelta(0):
         sprint_start_date = sprint_start_date + week_offset
         sprint_end_date = sprint_end_date + week_offset
@@ -354,7 +371,7 @@ async def print_commits():
     sprint_label = f"{label_prefix} ({format_timestamp(sprint_start_date, date_range_tz)} to {format_timestamp(sprint_end_date, date_range_tz)})"
 
     ext = {"console": "txt", "text": "txt", "json": "json", "markdown": "md"}[output_format]
-    output_file_path = os.path.join("output", f"{version_label}.{ext}")
+    output_file_path = os.path.join("output", f"{version_label}-unmerged-prs.{ext}")
     output_file = None
     if write_output_file:
         output_file = open(output_file_path, "w")
@@ -366,22 +383,24 @@ async def print_commits():
         DIM    = "\033[2m"
         CYAN   = "\033[36m"
         WHITE  = "\033[97m"
+        GREEN  = "\033[32m"
+        YELLOW = "\033[33m"
     else:
-        RESET = BOLD = DIM = CYAN = WHITE = ""
+        RESET = BOLD = DIM = CYAN = WHITE = GREEN = YELLOW = ""
 
     def field(name, value, width=26):
         return f"{DIM}{name:<{width}}{RESET}: {value}"
 
     if output_format in {"console", "text"}:
-        title = f"  {label_prefix}  "
+        title = f"  {label_prefix} — Approved Unmerged PRs  "
         border = "=" * max(60, len(title))
         print(f"\n{BOLD}{CYAN}{border}{RESET}")
         print(f"{BOLD}{WHITE}{title.center(len(border))}{RESET}")
         print(f"{BOLD}{CYAN}{border}{RESET}\n")
         if team_name:
-            print(f"Printing PRs for repos accessible by team {team_name} in organization {org_name}\n")
+            print(f"Printing approved unmerged PRs for repos accessible by team {team_name} in organization {org_name}\n")
         else:
-            print(f"No team specified. Printing PRs for all repos in organization {org_name}\n")
+            print(f"No team specified. Printing approved unmerged PRs for all repos in organization {org_name}\n")
         print(field("Sprint version", label_prefix))
         print(field("Sprint begin", format_timestamp(sprint_start_date, date_range_tz)))
         print(field("Sprint end", format_timestamp(sprint_end_date, date_range_tz)))
@@ -428,54 +447,70 @@ async def print_commits():
                     sprint_end_date,
                     allowed_branches,
                     semaphore,
-                    ignore_date_range=False,
+                )
+            )
+            for repo in repos
+        ]
+        merged_count_tasks = [
+            asyncio.create_task(
+                fetch_approved_merged_count(
+                    client,
+                    repo,
+                    sprint_start_date,
+                    sprint_end_date,
+                    allowed_branches,
+                    semaphore,
                 )
             )
             for repo in repos
         ]
 
+        repos_scanned = len(repos)
         repo_results = []
         for task in asyncio.as_completed(tasks):
             repo, prs = await task
             if prs:
                 repo_results.append((repo, prs))
 
-        # Order repos by the configurable RELEASE_REPO_ORDER rules (alphabetical
-        # within each group, and entirely alphabetical when no rules are set).
-        # Tasks complete out of order, so this also makes output deterministic.
-        repo_order_rules = get_release_repo_order()
-        repo_results.sort(key=lambda item: release_repo_sort_key(item[0].get('full_name') or "", repo_order_rules))
+        merged_count_results = await asyncio.gather(*merged_count_tasks)
+        merged_counts = {
+            repo.get('full_name'): count
+            for repo, count in zip(repos, merged_count_results)
+            if count > 0
+        }
 
         if output_format == "json":
             repo_payload = []
             for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
-                def _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr):
+                def _pr_entry(approved_at, pr_title, pr_message, pr_link, author, gitlab_issue, approved_by):
                     entry = {
-                        "date": pr_date.isoformat(),
+                        "approved_at": approved_at.isoformat(),
                     }
                     if date_range_tz != timezone.utc:
-                        entry["date_local"] = format_timestamp(pr_date, date_range_tz)
+                        entry["approved_at_local"] = format_timestamp(approved_at, date_range_tz)
                     entry.update({
                         "title": pr_title,
                         "author": author,
                         "description": pr_message,
                         "link": pr_link,
                         "gitlab_issue": gitlab_issue,
-                        "tags": tags,
-                        "commit_id": commit_id,
+                        "approved_by": approved_by,
                     })
-                    if via_pr is not None:
-                        entry["merged_via_pr"] = via_pr
                     return entry
 
                 repo_payload.append({
                     "repository": repo_name,
+                    "approved_count": len(prs),
+                    "approved_merged_count": merged_counts.get(repo_name, 0),
                     "pull_requests": [
-                        _pr_entry(pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr)
-                        for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr in prs
+                        _pr_entry(approved_at, pr_title, pr_message, pr_link, author, gitlab_issue, approved_by)
+                        for approved_at, pr_title, pr_message, pr_link, author, gitlab_issue, approved_by in prs
                     ],
                 })
+            total_unmerged = sum(len(prs) for _, prs in repo_results)
+            total_merged = sum(merged_counts.values())
+            all_repo_names = set(r.get('full_name') for r, _ in repo_results) | set(merged_counts.keys())
             payload = {
                 "organization": org_name,
                 "team": team_name,
@@ -487,10 +522,14 @@ async def print_commits():
                 "date_range_tz_offset": date_range_tz_raw,
                 "repo_name_filter": repo_name_filter,
                 "resolved_repo_name": matched_repo_name,
-                "date_filter": "sprint",
-                "release_prs": repo_payload,
+                "repositories_scanned": repos_scanned,
+                "repositories_with_prs": len(all_repo_names),
+                "total_approved_count": total_unmerged,
+                "total_approved_merged_count": total_merged,
+                "unmerged_prs": repo_payload,
             }
             print(json.dumps(payload, indent=2))
+
         elif output_format in {"console", "text"}:
             separator = "=" * 60
             pr_divider = f"{DIM}{'-' * 60}{RESET}"
@@ -499,30 +538,22 @@ async def print_commits():
                 print(f"\n{BOLD}{CYAN}{separator}{RESET}")
                 print(f"{BOLD}{WHITE}  {repo_name}{RESET}")
                 print(f"{BOLD}{CYAN}{separator}{RESET}\n")
-                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr in prs:
-                    formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                for approved_at, pr_title, pr_message, pr_link, author, gitlab_issue, approved_by in prs:
                     if date_range_tz != timezone.utc:
-                        print(field("Date (local)", format_timestamp(pr_date, date_range_tz), width=12))
+                        print(field("Approved (local)", format_timestamp(approved_at, date_range_tz), width=16))
                     else:
-                        print(field("Date", formatted_date, width=12))
-                    print(field("Title", pr_title, width=12))
+                        print(field("Approved", approved_at.strftime('%Y-%m-%d %H:%M:%S %Z'), width=16))
+                    print(field("Title", pr_title, width=16))
                     if gitlab_issue:
-                        print(field("GitLab Issue", gitlab_issue, width=12))
-                    print(field("Author", author, width=12))
-                    print(field("Description", pr_message, width=12))
-                    print(field("Link", pr_link, width=12))
-                    if via_pr is not None:
-                        print(field("Note", f"merged into dev via #{via_pr}", width=12))
-                    if tags:
-                        print(field("Tags", ", ".join(tags), width=12))
+                        print(field("GitLab Issue", gitlab_issue, width=16))
+                    print(field("Author", author, width=16))
+                    print(field("Description", pr_message, width=16))
+                    print(field("Link", pr_link, width=16))
+                    print(field("Approved By", ", ".join(approved_by), width=16))
                     print(pr_divider)
 
         elif output_format == "markdown":
-            def md_field(name, value, width=26):
-                padded = name + '\u00a0' * (width - len(name))
-                return f"{padded}: {value}  "
-
-            print(f"# {label_prefix}\n")
+            print(f"# {label_prefix} — Approved Unmerged PRs\n")
             print("| | |")
             print("|---|---|")
             print(f"| Organization | {org_name} |")
@@ -545,14 +576,13 @@ async def print_commits():
             for repo, prs in repo_results:
                 repo_name = repo.get('full_name')
                 print(f"\n## {repo_name}\n")
-                for pr_date, pr_title, pr_message, pr_link, author, gitlab_issue, tags, commit_id, via_pr in prs:
-                    formatted_date = pr_date.strftime('%Y-%m-%d %H:%M:%S %Z')
+                for approved_at, pr_title, pr_message, pr_link, author, gitlab_issue, approved_by in prs:
                     print(f"| | {pr_title} |")
                     print("|---|---|")
                     if date_range_tz != timezone.utc:
-                        print(f"| Date (local) | {format_timestamp(pr_date, date_range_tz)} |")
+                        print(f"| Approved (local) | {format_timestamp(approved_at, date_range_tz)} |")
                     else:
-                        print(f"| Date | {formatted_date} |")
+                        print(f"| Approved | {approved_at.strftime('%Y-%m-%d %H:%M:%S %Z')} |")
                     if gitlab_issue:
                         prefix, issue_num = gitlab_issue.split("-", 1)
                         project = "pointblue-gss" if prefix == "GSS" else "point-blue-tech"
@@ -561,14 +591,48 @@ async def print_commits():
                     print(f"| Author | {author} |")
                     print(f"| Description | {pr_message} |")
                     print(f"| Link | {pr_link} |")
-                    if via_pr is not None:
-                        print(f"| Note | merged into dev via #{via_pr} |")
-                    if tags:
-                        print(f"| Tags | {', '.join(tags)} |")
+                    print(f"| Approved By | {', '.join(approved_by)} |")
                     print()
 
     if output_format in {"console", "text", "markdown"}:
-        print('END')
+        total_unmerged = sum(len(prs) for _, prs in repo_results)
+        total_merged = sum(merged_counts.values())
+        unmerged_by_name = {repo.get('full_name'): prs for repo, prs in repo_results}
+        all_repo_names = sorted(set(unmerged_by_name.keys()) | set(merged_counts.keys()))
+
+        separator = "=" * 60
+        print(f"\n{BOLD}{CYAN}{separator}{RESET}")
+        print(f"{BOLD}{WHITE}  SUMMARY{RESET}")
+        print(f"{BOLD}{CYAN}{separator}{RESET}\n")
+
+        if all_repo_names:
+            for repo_name in all_repo_names:
+                parts = []
+                unmerged = unmerged_by_name.get(repo_name, [])
+                merged = merged_counts.get(repo_name, 0)
+                if unmerged:
+                    pr_word = "PR" if len(unmerged) == 1 else "PRs"
+                    parts.append(f"{len(unmerged)} approved unmerged {pr_word}")
+                if merged:
+                    pr_word = "PR" if merged == 1 else "PRs"
+                    parts.append(f"{merged} approved merged {pr_word}")
+                print(field(repo_name, ", ".join(parts), width=50))
+
+            print(f"\n{DIM}{'-' * 60}{RESET}")
+            totals = []
+            if total_unmerged:
+                pr_word = "PR" if total_unmerged == 1 else "PRs"
+                totals.append(f"{BOLD}{YELLOW}{total_unmerged} approved unmerged {pr_word}{RESET}")
+            else:
+                totals.append(f"{BOLD}{GREEN}no approved unmerged PRs{RESET}")
+            if total_merged:
+                pr_word = "PR" if total_merged == 1 else "PRs"
+                totals.append(f"{total_merged} approved merged {pr_word}")
+            repo_word = "repository" if len(all_repo_names) == 1 else "repositories"
+            print(f"{', '.join(totals)} across {len(all_repo_names)} {repo_word} ({repos_scanned} scanned)")
+        else:
+            print(f"No approved PRs found across {repos_scanned} repositories.")
+        print()
 
     if output_file:
         sys.stdout = sys.__stdout__
@@ -577,4 +641,4 @@ async def print_commits():
 
 
 if __name__ == "__main__":
-    asyncio.run(print_commits())
+    asyncio.run(print_unmerged_prs())
