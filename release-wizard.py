@@ -66,18 +66,20 @@ class WizardAbort(Exception):
 # Resumable progress state (best-effort; never fatal)
 # ---------------------------------------------------------------------------
 # Coarse stages a run can be resumed from:
-#   "release" — sprint chosen & confirmed; still creating/merging/verifying RCs
+#   "release" — sprint chosen & confirmed; RC PRs not yet created
+#   "verify"  — RC PRs created/open; waiting on manual merges & re-verifying
 #   "notes"   — RCs are done; still generating/reviewing notes and publishing
-RESUMABLE_STEPS = ("release", "notes")
+RESUMABLE_STEPS = ("release", "verify", "notes")
 
 
-def save_state(sprint, cfg, step):
+def save_state(sprint, cfg, step, excluded_repos=None):
     state = {
         "version": sprint["version"],
         "week_arg": sprint["week_arg"],
         "org": cfg["org"],
         "team": cfg["team"],
         "step": step,
+        "excluded_repos": list(excluded_repos or []),
     }
     try:
         os.makedirs(os.path.join(REPO_DIR, "output"), exist_ok=True)
@@ -277,6 +279,51 @@ def parse_all_released(text):
     return re.findall(r"\[SKIP\] (\S+): Skipping \(all PRs already in", text)
 
 
+def apply_exclusions(json_path, excluded_repos):
+    """Drop repos from the wizard's saved release-input JSON.
+
+    create-release-candidate.py only ever looks at entries under
+    "release_prs", so removing a repo's entry there means the script won't
+    consider it at all — no RC PR gets created and it won't show up as
+    skipped either.
+    """
+    if not excluded_repos:
+        return
+    abs_path = os.path.join(REPO_DIR, json_path)
+    with open(abs_path) as fh:
+        payload = json.load(fh)
+    payload["release_prs"] = [
+        entry
+        for entry in payload.get("release_prs", [])
+        if entry.get("repository") not in excluded_repos
+    ]
+    with open(abs_path, "w") as fh:
+        json.dump(payload, fh, indent=2)
+
+
+def choose_repos_to_exclude(candidates):
+    """Prompt for repos to exclude from `candidates`. Returns a list of names."""
+    print(f"\n{BOLD}Repos that would get a new RC PR:{RESET}")
+    for idx, repo in enumerate(candidates, start=1):
+        print(f"  {BOLD}{idx}{RESET}) {repo}")
+    resp = _ask(
+        "Enter repo number(s) to exclude, comma-separated (or Enter for none, "
+        "q to abort): "
+    )
+    if not resp:
+        return []
+    excluded = []
+    for token in resp.split(","):
+        token = token.strip()
+        if token.isdigit() and 1 <= int(token) <= len(candidates):
+            repo = candidates[int(token) - 1]
+            if repo not in excluded:
+                excluded.append(repo)
+        elif token:
+            print(f"{YELLOW}Ignoring invalid entry: {token}{RESET}")
+    return excluded
+
+
 # ---------------------------------------------------------------------------
 # Wizard steps
 # ---------------------------------------------------------------------------
@@ -353,9 +400,21 @@ def generate_scope_json(sprint, cfg):
     return rel_json_path
 
 
-def step_create_rcs(sprint, json_path):
-    """Preview (dry-run), confirm, then create. Returns (created, open_rc)."""
+def step_create_rcs(sprint, json_path, excluded_repos=None):
+    """Preview (dry-run), let the operator exclude repos, then create.
+
+    Returns (created, open_rc, excluded_repos) — excluded_repos is the
+    cumulative list of repos left out of this release (including any passed
+    in from a resumed run), so callers can persist it across steps/resume.
+    """
+    excluded_repos = list(excluded_repos or [])
     section(f"Step 3 — Create release candidates for {sprint['version']}")
+
+    if excluded_repos:
+        print(
+            f"{DIM}Already excluded from this release: "
+            f"{', '.join(excluded_repos)}{RESET}"
+        )
 
     print(f"{DIM}Previewing release candidates (dry run)…{RESET}")
     rc, out, err = run_script([CREATE_RC, json_path, "--dry-run"])
@@ -365,30 +424,60 @@ def step_create_rcs(sprint, json_path):
     if err.strip():
         print(f"{DIM}{err.rstrip()}{RESET}")
 
-    combined = out + "\n" + err
     would_create = parse_would_create(out)
     open_rc = parse_open_rc_prs(out)
-    all_released = parse_all_released(combined)
 
-    if not would_create and not open_rc:
-        print(
-            f"\n{GREEN}Nothing new to release — every repo is already merged into "
-            f"its release branch.{RESET}"
+    while True:
+        if not would_create and not open_rc:
+            print(
+                f"\n{GREEN}Nothing new to release — every remaining repo is "
+                f"already merged into its release branch.{RESET}"
+            )
+            return [], [], excluded_repos
+
+        if not would_create and open_rc:
+            # Only pre-existing open RC PRs; nothing new to create.
+            print(
+                f"\n{YELLOW}No new RC PRs to create, but {len(open_rc)} open RC "
+                f"PR(s) already exist and still need to be merged.{RESET}"
+            )
+            return [], open_rc, excluded_repos
+
+        action = choose(
+            f"{len(would_create)} repo(s) need a new RC PR for "
+            f"{sprint['version']}. What do you want to do?",
+            [
+                ("create", f"Create RC PR(s) for all {len(would_create)} repo(s)"),
+                ("exclude", "Exclude one or more repos from this release"),
+                ("abort", "Abort"),
+            ],
+            default=1,
         )
-        return [], []
+        if action == "abort":
+            raise WizardAbort
+        if action == "create":
+            break
 
-    if not would_create and open_rc:
-        # Only pre-existing open RC PRs; nothing new to create.
+        # action == "exclude"
+        newly_excluded = choose_repos_to_exclude(would_create)
+        if not newly_excluded:
+            continue
+
+        excluded_repos = excluded_repos + newly_excluded
+        apply_exclusions(json_path, newly_excluded)
         print(
-            f"\n{YELLOW}No new RC PRs to create, but {len(open_rc)} open RC PR(s) "
-            f"already exist and still need to be merged.{RESET}"
+            f"\n{DIM}Excluding from this release: {', '.join(newly_excluded)}{RESET}"
         )
-        return [], open_rc
 
-    if not confirm(
-        f"Create {len(would_create)} release candidate PR(s) for {sprint['version']}?"
-    ):
-        raise WizardAbort
+        print(f"\n{DIM}Re-checking remaining repos (dry run)…{RESET}")
+        rc, out, err = run_script([CREATE_RC, json_path, "--dry-run"])
+        if rc != 0:
+            _fail("create-release-candidate.py --dry-run", rc, out, err)
+        print(out.rstrip())
+        if err.strip():
+            print(f"{DIM}{err.rstrip()}{RESET}")
+        would_create = parse_would_create(out)
+        open_rc = parse_open_rc_prs(out)
 
     print(f"\n{DIM}Creating release candidate PRs…{RESET}")
     rc, out2, err2 = run_script([CREATE_RC, json_path])
@@ -400,7 +489,7 @@ def step_create_rcs(sprint, json_path):
 
     created = parse_created_rc_prs(out2)
     open_rc = parse_open_rc_prs(out2)
-    return created, open_rc
+    return created, open_rc, excluded_repos
 
 
 def step_wait_for_merges(created, open_rc):
@@ -422,7 +511,13 @@ def step_wait_for_merges(created, open_rc):
 
 
 def step_verify(sprint, json_path):
-    """Re-run the dry-run to confirm merge status. Returns True when fully merged."""
+    """Re-run the dry-run to confirm merge status.
+
+    Returns (ready, unmerged_repos): ready is True when every repo is fully
+    merged; unmerged_repos is the list of repo names still pending (either an
+    open RC PR or new unreleased commits on dev), for use if the operator
+    chooses to proceed without them.
+    """
     section("Step 5 — Verify what is being released")
     print(f"{DIM}Re-checking merge status…{RESET}")
     rc, out, err = run_script([CREATE_RC, json_path, "--dry-run"])
@@ -452,7 +547,8 @@ def step_verify(sprint, json_path):
         for repo in would_create:
             print(f"  {YELLOW}•{RESET} {repo}")
 
-    return not unmerged
+    unmerged_repos = [repo for repo, _ in open_rc] + list(would_create)
+    return not unmerged, unmerged_repos
 
 
 def step_release_notes(sprint, cfg):
@@ -514,33 +610,66 @@ def step_publish_confluence(notes_path):
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
-def run_release(sprint, cfg, start="release"):
+def run_release(sprint, cfg, start="release", excluded_repos=None):
     """Run the release pipeline from `start` onward.
 
     The RC phase re-derives merge status live from GitHub (idempotent dry-run),
     so resuming at "release" continues correctly regardless of how far the
-    earlier run got with creating or merging RC PRs.
+    earlier run got with creating RC PRs. Once RC PRs exist, progress is saved
+    as "verify" so resuming doesn't re-offer to create them again — it goes
+    straight to the merge-verification loop.
+
+    `excluded_repos` carries forward repos the operator has chosen to leave
+    out of this release (e.g. a closed RC PR), so a resumed run doesn't
+    re-offer to create RC PRs for them.
     """
+    excluded_repos = list(excluded_repos or [])
+    json_path = os.path.join("output", f"{sprint['version']}.json")
+
     if start == "release":
         json_path = generate_scope_json(sprint, cfg)
-        created, open_rc = step_create_rcs(sprint, json_path)
+        apply_exclusions(json_path, excluded_repos)
+        created, open_rc, excluded_repos = step_create_rcs(
+            sprint, json_path, excluded_repos
+        )
 
         if not created and not open_rc:
             # Everything already released — skip straight to release notes.
             if not confirm("Generate release notes now?", default=True):
                 raise WizardAbort
+            save_state(sprint, cfg, "notes", excluded_repos)
+            start = "notes"
         else:
             step_wait_for_merges(created, open_rc)
-            # Verify-and-merge loop until nothing is left un-merged.
-            while not step_verify(sprint, json_path):
-                print(
-                    f"\n{YELLOW}Some repos still have un-merged release candidates.{RESET}"
-                )
-                pause("Merge the remaining RC PRs, then press Enter to re-check (or q to abort)…")
-            if not confirm("Releases look correct — generate release notes?"):
-                raise WizardAbort
+            save_state(sprint, cfg, "verify", excluded_repos)
+            start = "verify"
 
-        save_state(sprint, cfg, "notes")
+    if start == "verify":
+        # Verify-and-merge loop until nothing is left un-merged, unless the
+        # operator explicitly chooses to proceed without the stragglers
+        # (e.g. they closed an auto-created RC PR on purpose).
+        while True:
+            ready, unmerged_repos = step_verify(sprint, json_path)
+            if ready:
+                break
+            print(
+                f"\n{YELLOW}Some repos still have un-merged release candidates.{RESET}"
+            )
+            if confirm(
+                f"Proceed without releasing {len(unmerged_repos)} un-merged "
+                "repo(s) this sprint?",
+                default=False,
+            ):
+                print(
+                    f"\n{DIM}Excluding from this release: "
+                    f"{', '.join(unmerged_repos)}{RESET}"
+                )
+                break
+            pause("Merge the remaining RC PRs, then press Enter to re-check (or q to abort)…")
+        if not confirm("Releases look correct — generate release notes?"):
+            raise WizardAbort
+
+        save_state(sprint, cfg, "notes", excluded_repos)
         start = "notes"
 
     if start == "notes":
@@ -566,11 +695,11 @@ def main():
         # Offer to resume an interrupted run before starting a fresh one.
         state = load_state()
         if state:
-            stage = (
-                "creating/merging release candidates"
-                if state["step"] == "release"
-                else "release notes"
-            )
+            stage = {
+                "release": "creating release candidates",
+                "verify": "merging/verifying release candidates",
+                "notes": "release notes",
+            }[state["step"]]
             print(
                 f"\n{YELLOW}An unfinished release for {GREEN}{state['version']}{YELLOW} "
                 f"was found (stopped at: {stage}).{RESET}"
@@ -580,7 +709,12 @@ def main():
                 resume_cfg = dict(cfg)
                 resume_cfg["org"] = state.get("org") or cfg["org"]
                 resume_cfg["team"] = state.get("team")
-                run_release(sprint, resume_cfg, start=state["step"])
+                run_release(
+                    sprint,
+                    resume_cfg,
+                    start=state["step"],
+                    excluded_repos=state.get("excluded_repos"),
+                )
                 return
             if confirm("Discard the saved progress and start fresh?", default=False):
                 clear_state()

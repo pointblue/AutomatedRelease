@@ -51,9 +51,9 @@ For a normal release you only need this script — you do not need to run the in
 **The guided flow:**
   1. **Select a sprint** - choose previous, current, or next; each is shown with its `vYYYY.WW` version and date window. The current sprint is the default (press Enter to select it).
   2. **Review PRs in scope** - runs `main.py format=console` and shows its output so you can see exactly what merged this sprint. If the sprint has no PRs (common for the *next* sprint), you can pick a different one.
-  3. **Create release candidates** - once you confirm, the wizard generates the JSON input (`output/vYYYY.WW.json`), previews with a dry run, asks for explicit confirmation, then runs `create-release-candidate.py` and lists the created RC PR links.
+  3. **Create release candidates** - once you confirm, the wizard generates the JSON input (`output/vYYYY.WW.json`) and previews with a dry run. If any repos need a new RC PR, you can create them all, exclude one or more repos from this release (e.g. you closed their auto-created RC PR on purpose), or abort. Excluded repos are remembered if you resume an interrupted run. Once confirmed, it runs `create-release-candidate.py` and lists the created RC PR links.
   4. **Merge the RC PRs (manual)** - the wizard prints the PR links and waits. You open and merge each one yourself in GitHub; this friction is intentional.
-  5. **Verify** - re-runs the dry run to confirm which repos are now fully merged versus still have an open, un-merged RC PR. If any remain un-merged, it loops back so you can merge them.
+  5. **Verify** - re-runs the dry run to confirm which repos are now fully merged versus still have an open, un-merged RC PR. If any remain un-merged, it loops back so you can merge them, or you can choose to proceed and leave those repos out of this release (e.g. if you closed their RC PR intentionally).
   6. **Generate release notes** - runs `create-release-notes.py --output` (writing `output/vYYYY.WW-release-notes.md`) and previews the result for your confirmation.
   7. **Publish to Confluence (optional)** - if `CONFLUENCE_EMAIL`/`CONFLUENCE_API_TOKEN` are set and you confirm, runs `create-confluence-page.py` (with an optional `--draft`). If the Confluence credentials are missing, this step is skipped gracefully and the notes file is left in `output/`.
 
